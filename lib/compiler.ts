@@ -47,7 +47,7 @@ export async function* streamThinking(
 
   // Phase 1: Think out loud
   const thinkingResult = streamText({
-    model: google("gemini-2.5-flash"),
+    model: google("gemini-3-flash-preview"),
     prompt: `You are a project planning assistant. A user has given you this project brief:
 
 "${brief}"
@@ -72,7 +72,7 @@ Keep each observation to 1-2 sentences. Be practical and specific.`,
 
   // Phase 2: Generate structured plan
   const planResult = await generateObject({
-    model: google("gemini-2.5-flash"),
+    model: google("gemini-3-flash-preview"),
     schema: planSchema,
     prompt: `You are a project planning assistant. A user has given you this project brief:
 
