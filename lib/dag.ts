@@ -51,23 +51,34 @@ export function getAllTasks(nodes: DagNode[]): Task[] {
 }
 
 export function computeUnlocked(nodes: DagNode[], doneIds: Set<string>): DagNode[] {
+  // Expand doneIds to include parallel group IDs when all their children are done
+  const expandedDone = new Set(doneIds);
+  for (const node of nodes) {
+    if (node.type === "parallel_group") {
+      const allChildrenDone = node.children.every((c) => doneIds.has(c.id));
+      if (allChildrenDone) {
+        expandedDone.add(node.id);
+      }
+    }
+  }
+
   return nodes.map((node) => {
     if (node.type === "task") {
-      if (doneIds.has(node.id)) return { ...node, status: "done" as const };
-      const allDepsMet = node.depends_on.every((dep) => doneIds.has(dep));
+      if (expandedDone.has(node.id)) return { ...node, status: "done" as const };
+      const allDepsMet = node.depends_on.every((dep) => expandedDone.has(dep));
       return { ...node, status: allDepsMet ? ("pending" as const) : ("locked" as const) };
     } else {
       const updatedChildren = node.children.map((child) => {
-        if (doneIds.has(child.id)) return { ...child, status: "done" as const };
-        const groupDepsMet = node.depends_on.every((dep) => doneIds.has(dep));
-        const childDepsMet = child.depends_on.every((dep) => doneIds.has(dep));
+        if (expandedDone.has(child.id)) return { ...child, status: "done" as const };
+        const groupDepsMet = node.depends_on.every((dep) => expandedDone.has(dep));
+        const childDepsMet = child.depends_on.every((dep) => expandedDone.has(dep));
         return {
           ...child,
           status: groupDepsMet && childDepsMet ? ("pending" as const) : ("locked" as const),
         };
       });
       const allChildrenDone = updatedChildren.every((c) => c.status === "done");
-      const groupDepsMet = node.depends_on.every((dep) => doneIds.has(dep));
+      const groupDepsMet = node.depends_on.every((dep) => expandedDone.has(dep));
       let groupStatus: Status = "locked";
       if (allChildrenDone) groupStatus = "done";
       else if (groupDepsMet) groupStatus = "pending";
