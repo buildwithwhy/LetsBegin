@@ -1126,12 +1126,36 @@ export default function Home() {
               setThinkingText((prev) => prev + event.text);
             } else if (event.type === "status") {
               setCompileStatus(event.text);
-            } else if (event.type === "progress") {
-              setCompileStatus(`Structuring your plan... ${event.taskCount} tasks found`);
             } else if (event.type === "plan") {
               setCompileStartTime(null);
               setPlan(event.plan);
               setStep("reveal");
+            } else if (event.type === "subtasks") {
+              // Merge subtasks into the existing plan
+              setPlan((prev) => {
+                if (!prev) return prev;
+                const subtaskMap = new Map<string, string[]>();
+                for (const t of event.tasks) {
+                  subtaskMap.set(t.id, t.subtasks);
+                }
+                const updatedNodes = prev.nodes.map((node: DagNode) => {
+                  if (node.type === "task" && subtaskMap.has(node.id)) {
+                    return { ...node, subtasks: subtaskMap.get(node.id) };
+                  }
+                  if (node.type === "parallel_group") {
+                    return {
+                      ...node,
+                      children: node.children.map((child: Task) =>
+                        subtaskMap.has(child.id)
+                          ? { ...child, subtasks: subtaskMap.get(child.id) }
+                          : child
+                      ),
+                    };
+                  }
+                  return node;
+                });
+                return { ...prev, nodes: updatedNodes as DagNode[] };
+              });
             } else if (event.type === "error") {
               console.error("Compile error:", event.text);
               setCompileStatus("Something went wrong — try again");

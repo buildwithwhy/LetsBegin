@@ -1,8 +1,9 @@
-import { streamText, streamObject } from "ai";
+import { streamText, generateObject } from "ai";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
-import { type Plan, type DagNode, computeUnlocked } from "./dag";
+import { type Plan, type Task, type DagNode, getAllTasks, computeUnlocked } from "./dag";
 
+// Schema WITHOUT subtasks — fast to generate
 const taskSchema = z.object({
   id: z.string(),
   type: z.literal("task"),
@@ -12,7 +13,6 @@ const taskSchema = z.object({
   energy: z.enum(["high", "medium", "low"]),
   status: z.literal("pending"),
   depends_on: z.array(z.string()),
-  subtasks: z.array(z.string()).optional(),
 });
 
 const parallelGroupSchema = z.object({
@@ -29,11 +29,21 @@ const planSchema = z.object({
   nodes: z.array(z.union([taskSchema, parallelGroupSchema])),
 });
 
+// Schema for subtasks enrichment
+const subtasksSchema = z.object({
+  tasks: z.array(
+    z.object({
+      id: z.string(),
+      subtasks: z.array(z.string()),
+    })
+  ),
+});
+
 export type CompilerEvent =
   | { type: "thought"; text: string }
   | { type: "status"; text: string }
-  | { type: "progress"; taskCount: number }
   | { type: "plan"; plan: Plan }
+  | { type: "subtasks"; tasks: { id: string; subtasks: string[] }[] }
   | { type: "error"; text: string };
 
 type ImageInput = { mediaType: string; data: string };
@@ -80,11 +90,10 @@ Keep each observation to 1-2 sentences. Be practical and specific.`;
     yield { type: "thought", text: chunk };
   }
 
-  // Signal transition to Phase 2
+  // Phase 2: Generate plan structure (no subtasks — fast)
   yield { type: "status", text: "Structuring your plan..." };
 
-  // Phase 2: Stream structured plan (so we get partial progress)
-  const planStream = streamObject({
+  const planResult = await generateObject({
     model: google("gemini-3-flash-preview"),
     schema: planSchema,
     prompt: `You are a project planning assistant. A user has given you this project brief:
@@ -103,30 +112,53 @@ Rules:
 - All tasks must have status: "pending" (the system will compute locked/unlocked states)
 - assignee is "agent" (AI can fully automate), "user" (human must do it), or "hybrid" (agent drafts, human reviews)
 - energy is "high" (significant effort), "medium" (moderate effort), or "low" (quick task)
-
-SUBTASKS — this is important:
-- Keep task titles at a high level for a clean overview (e.g., "Set up Apple Developer account")
-- For EVERY user and hybrid task, include a "subtasks" array with 3-8 concrete, actionable sub-steps
-- Sub-steps should be specific enough that someone unfamiliar with the process can follow them
-  (e.g., "Go to developer.apple.com and click 'Account'", "Sign in with your Apple ID", "Click 'Enroll' in the Apple Developer Program", "Choose 'Individual' enrollment", "Pay the $99/year fee")
-- Agent tasks don't need subtasks (the agent handles the details)
-- The brief may contain context from clarifying questions about the user's experience level and preferences — use this to calibrate subtask detail. More detail for beginners, less for experienced users.
+- Do NOT include subtasks — keep this lean
 
 Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the dependency graph is valid — no circular dependencies, and every id referenced in depends_on must exist.`,
   });
 
-  let lastNodeCount = 0;
-
-  for await (const partial of planStream.partialObjectStream) {
-    if (partial.nodes && partial.nodes.length > lastNodeCount) {
-      lastNodeCount = partial.nodes.length;
-      yield { type: "progress", taskCount: lastNodeCount };
-    }
-  }
-
-  const finalResult = await planStream.object;
-  const plan = finalResult as Plan;
+  const plan = planResult.object as Plan;
   plan.nodes = computeUnlocked(plan.nodes as DagNode[], new Set());
 
+  // Yield plan immediately so UI shows it fast
   yield { type: "plan", plan };
+
+  // Phase 3: Generate subtasks for user/hybrid tasks (runs after plan is shown)
+  const humanTasks = getAllTasks(plan.nodes).filter(
+    (t) => t.assignee === "user" || t.assignee === "hybrid"
+  );
+
+  if (humanTasks.length > 0) {
+    yield { type: "status", text: "Adding step-by-step details..." };
+
+    try {
+      const taskList = humanTasks
+        .map((t) => `- id: "${t.id}", title: "${t.title}", description: "${t.description}"`)
+        .join("\n");
+
+      const subtasksResult = await generateObject({
+        model: google("gemini-3-flash-preview"),
+        schema: subtasksSchema,
+        prompt: `For the following tasks in a project plan, generate concrete step-by-step subtasks.
+
+Project: "${brief}"
+
+Tasks that need subtasks:
+${taskList}
+
+For each task, generate 3-8 specific, actionable sub-steps.
+Sub-steps should be specific enough that someone unfamiliar with the process can follow them.
+For example, instead of "set up account", write "Go to developer.apple.com and click 'Enroll'".
+
+The brief may contain context from clarifying questions about the user's experience level — use this to calibrate detail. More detail for beginners, less for experienced users.
+
+Return the task id and its subtasks array for each task.`,
+      });
+
+      yield { type: "subtasks", tasks: subtasksResult.object.tasks };
+    } catch (err) {
+      console.error("Subtask generation failed:", err);
+      // Non-fatal — plan still works without subtasks
+    }
+  }
 }
