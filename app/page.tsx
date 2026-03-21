@@ -1053,6 +1053,7 @@ export default function Home() {
 
   const handleClarify = async () => {
     setClarifyLoading(true);
+    setQuestionIndex(0);
     setStep("clarify");
     try {
       const res = await fetch("/api/clarify", {
@@ -1060,16 +1061,30 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ brief }),
       });
-      const data = await res.json();
-      setQuestions(data.questions || []);
+      if (!res.ok) {
+        console.error("Clarify API error:", res.status);
+        setQuestions([]);
+        return;
+      }
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        console.error("Clarify returned non-JSON:", text.slice(0, 200));
+        setQuestions([]);
+        return;
+      }
+      const qs = data.questions || [];
+      setQuestions(qs);
       const initialAnswers: Record<string, string> = {};
-      (data.questions || []).forEach((q: ClarifyQuestion) => {
-        if (q.type === "yes_no") initialAnswers[q.id] = "";
-        else initialAnswers[q.id] = "";
+      qs.forEach((q: ClarifyQuestion) => {
+        initialAnswers[q.id] = "";
       });
       setAnswers(initialAnswers);
     } catch (err) {
       console.error("Clarify failed:", err);
+      setQuestions([]);
     } finally {
       setClarifyLoading(false);
     }
@@ -1617,7 +1632,29 @@ export default function Home() {
                   </button>
                 </div>
               </div>
-            ) : null}
+            ) : (
+              <div style={{ textAlign: "center", padding: "30px 0" }}>
+                <p style={{ color: "#666", fontSize: 14, marginBottom: 16 }}>
+                  Couldn&apos;t generate questions — let&apos;s go straight to planning.
+                </p>
+                <button
+                  onClick={handleCompile}
+                  style={{
+                    padding: "12px 28px",
+                    border: "none",
+                    borderRadius: 10,
+                    background: PRIMARY,
+                    color: "#fff",
+                    fontSize: 15,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  Build my plan &rarr;
+                </button>
+              </div>
+            )}
           </div>
         )}
 
