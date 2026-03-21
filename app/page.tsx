@@ -947,12 +947,32 @@ function TaskCard({
       )}
 
       {result && task.assignee === "hybrid" && (
-        <AgentPanel
-          result={result}
-          showApprove
-          onApprove={() => onMarkDone(task.id)}
-          onRegenerate={() => onRunAgent(task, true)}
-        />
+        <div>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "8px 12px",
+            borderRadius: 8,
+            background: `${PRIMARY}08`,
+            border: `1px solid ${PRIMARY}18`,
+            marginBottom: 8,
+            marginTop: 8,
+            fontSize: 12,
+            color: PRIMARY,
+            fontWeight: 500,
+          }}>
+            {result.done
+              ? "\u2705 Agent completed their part — review below and approve or regenerate"
+              : "\u26A1 Agent is working on their part..."}
+          </div>
+          <AgentPanel
+            result={result}
+            showApprove
+            onApprove={() => onMarkDone(task.id)}
+            onRegenerate={() => onRunAgent(task, true)}
+          />
+        </div>
       )}
       {result && task.assignee === "agent" && (
         <AgentPanel result={result} />
