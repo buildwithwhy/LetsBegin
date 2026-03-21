@@ -12,6 +12,7 @@ const taskSchema = z.object({
   energy: z.enum(["high", "medium", "low"]),
   status: z.literal("pending"),
   depends_on: z.array(z.string()),
+  subtasks: z.array(z.string()).optional(),
 });
 
 const parallelGroupSchema = z.object({
@@ -28,17 +29,6 @@ const planSchema = z.object({
   nodes: z.array(z.union([taskSchema, parallelGroupSchema])),
 });
 
-function authorityPrompt(authority: "minimal" | "moderate" | "high"): string {
-  switch (authority) {
-    case "minimal":
-      return "Prefer assigning tasks to 'user'. Only use 'agent' for fully automatable steps like drafting text or generating boilerplate. Use 'hybrid' for steps where an agent can draft but a human must review.";
-    case "moderate":
-      return "Balance tasks between 'agent' and 'user'. Use 'hybrid' where an agent can draft content and a user reviews it. Automate what's clearly automatable, keep human judgment where it matters.";
-    case "high":
-      return "Prefer assigning tasks to 'agent' wherever possible. Use 'hybrid' for sign-off or approval steps. Only use 'user' for tasks that absolutely require human-only access (like logging into accounts or physical actions).";
-  }
-}
-
 export type CompilerEvent =
   | { type: "thought"; text: string }
   | { type: "status"; text: string }
@@ -50,11 +40,8 @@ type ImageInput = { mediaType: string; data: string };
 
 export async function* streamThinking(
   brief: string,
-  authority: "minimal" | "moderate" | "high",
   images: ImageInput[] = []
 ): AsyncGenerator<CompilerEvent> {
-  const authNote = authorityPrompt(authority);
-
   const imageContent = images.map((img) => ({
     type: "image" as const,
     image: img.data,
@@ -72,8 +59,6 @@ Think out loud about this brief. Make 4-6 short observations about:
 - Which tasks can run in parallel
 - Which tasks should be done by an AI agent vs a human vs hybrid (agent drafts, human reviews)
 - Any risks or gotchas
-
-${authNote}
 
 Keep each observation to 1-2 sentences. Be practical and specific.`;
 
@@ -119,9 +104,15 @@ Rules:
 - assignee is "agent" (AI can fully automate), "user" (human must do it), or "hybrid" (agent drafts, human reviews)
 - energy is "high" (significant effort), "medium" (moderate effort), or "low" (quick task)
 
-${authNote}
+SUBTASKS — this is important:
+- Keep task titles at a high level for a clean overview (e.g., "Set up Apple Developer account")
+- For EVERY user and hybrid task, include a "subtasks" array with 3-8 concrete, actionable sub-steps
+- Sub-steps should be specific enough that someone unfamiliar with the process can follow them
+  (e.g., "Go to developer.apple.com and click 'Account'", "Sign in with your Apple ID", "Click 'Enroll' in the Apple Developer Program", "Choose 'Individual' enrollment", "Pay the $99/year fee")
+- Agent tasks don't need subtasks (the agent handles the details)
+- The brief may contain context from clarifying questions about the user's experience level and preferences — use this to calibrate subtask detail. More detail for beginners, less for experienced users.
 
-Generate a realistic, practical plan with 6-12 tasks total. Make sure the dependency graph is valid — no circular dependencies, and every id referenced in depends_on must exist.`,
+Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the dependency graph is valid — no circular dependencies, and every id referenced in depends_on must exist.`,
   });
 
   let lastNodeCount = 0;

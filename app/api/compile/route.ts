@@ -1,7 +1,7 @@
 import { streamThinking } from "@/lib/compiler";
 
 export async function POST(req: Request) {
-  const { brief, authority, attachments } = await req.json();
+  const { brief, attachments } = await req.json();
 
   const images: { mediaType: string; data: string }[] = (attachments || [])
     .filter((a: { dataUrl: string }) => a.dataUrl?.startsWith("data:image"))
@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        for await (const event of streamThinking(brief, authority, images)) {
+        for await (const event of streamThinking(brief, images)) {
           const data = JSON.stringify(event) + "\n";
           controller.enqueue(encoder.encode(data));
         }

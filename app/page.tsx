@@ -591,6 +591,69 @@ function TaskChat({
   );
 }
 
+// ─── SubtaskList ───
+
+function SubtaskList({ subtasks, autoExpand = false }: { subtasks: string[]; autoExpand?: boolean }) {
+  const [expanded, setExpanded] = useState(autoExpand);
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          background: "none",
+          border: "none",
+          padding: 0,
+          fontSize: 12,
+          color: PRIMARY,
+          cursor: "pointer",
+          fontWeight: 500,
+          fontFamily: "'DM Sans', sans-serif",
+        }}
+      >
+        {expanded ? "\u25BC" : "\u25B6"} {subtasks.length} steps
+      </button>
+      {expanded && (
+        <div style={{ marginTop: 8, paddingLeft: 4 }}>
+          {subtasks.map((st, i) => (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "flex-start",
+                marginBottom: 6,
+                fontSize: 12,
+                color: "#666",
+                lineHeight: 1.5,
+              }}
+            >
+              <span
+                style={{
+                  minWidth: 18,
+                  height: 18,
+                  borderRadius: "50%",
+                  border: "1.5px solid #ddd",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 10,
+                  color: "#bbb",
+                  flexShrink: 0,
+                  marginTop: 1,
+                }}
+              >
+                {i + 1}
+              </span>
+              {st}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── TaskCard ───
 
 function TaskCard({
@@ -599,12 +662,14 @@ function TaskCard({
   onMarkDone,
   onRunAgent,
   projectSummary,
+  autoExpandSubtasks = false,
 }: {
   task: Task;
   result?: AgentResult;
   onMarkDone: (id: string) => void;
   onRunAgent: (task: Task) => void;
   projectSummary: string;
+  autoExpandSubtasks?: boolean;
 }) {
   const isLocked = task.status === "locked";
   const isDone = task.status === "done";
@@ -662,6 +727,10 @@ function TaskCard({
       <div style={{ fontSize: 13, color: "#666", lineHeight: 1.5, marginBottom: 10 }}>
         {task.description}
       </div>
+
+      {task.subtasks && task.subtasks.length > 0 && isPending && (
+        <SubtaskList subtasks={task.subtasks} autoExpand={autoExpandSubtasks} />
+      )}
 
       {isPending && !result && (task.assignee === "agent" || task.assignee === "hybrid") && (
         <button
@@ -901,13 +970,12 @@ type ClarifyQuestion = {
   options?: string[];
 };
 
-type Step = "input" | "calibrate" | "clarify" | "compiling" | "reveal";
+type Step = "input" | "clarify" | "compiling" | "reveal";
 
 export default function Home() {
   const [step, setStep] = useState<Step>("input");
   const [brief, setBrief] = useState("");
   const [attachments, setAttachments] = useState<{ name: string; dataUrl: string }[]>([]);
-  const [authority, setAuthority] = useState<"minimal" | "moderate" | "high">("moderate");
   const [questions, setQuestions] = useState<ClarifyQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [clarifyLoading, setClarifyLoading] = useState(false);
@@ -1033,7 +1101,7 @@ export default function Home() {
       const res = await fetch("/api/compile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief: enrichedBrief, authority, attachments }),
+        body: JSON.stringify({ brief: enrichedBrief, attachments }),
       });
 
       const reader = res.body?.getReader();
@@ -1077,7 +1145,7 @@ export default function Home() {
     } catch (err) {
       console.error("Compile failed:", err);
       setCompileStartTime(null);
-      setStep("calibrate");
+      setStep("input");
     }
   };
 
@@ -1291,7 +1359,7 @@ export default function Home() {
             )}
 
             <button
-              onClick={() => setStep("calibrate")}
+              onClick={handleClarify}
               disabled={brief.trim().length < 10}
               style={{
                 marginTop: 16,
@@ -1303,98 +1371,6 @@ export default function Home() {
                 fontSize: 15,
                 fontWeight: 600,
                 cursor: brief.trim().length < 10 ? "not-allowed" : "pointer",
-                fontFamily: "'DM Sans', sans-serif",
-              }}
-            >
-              Continue &rarr;
-            </button>
-          </div>
-        )}
-
-        {/* ─── CALIBRATE ─── */}
-        {step === "calibrate" && (
-          <div>
-            <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>
-              How much should the agent do?
-            </h2>
-            <div
-              style={{
-                background: "#fff",
-                borderRadius: 12,
-                padding: 18,
-                border: "1px solid #e8e6f0",
-                marginBottom: 20,
-                fontSize: 14,
-                lineHeight: 1.6,
-                color: "#444",
-              }}
-            >
-              <span style={{ fontWeight: 600, color: "#1a1a2e" }}>Your brief: </span>
-              {brief}
-              {attachments.length > 0 && (
-                <span style={{ color: "#888", fontSize: 12, marginLeft: 8 }}>
-                  + {attachments.length} image{attachments.length > 1 ? "s" : ""} attached
-                </span>
-              )}
-              <button
-                onClick={() => setStep("input")}
-                style={{
-                  marginLeft: 8,
-                  background: "none",
-                  border: "none",
-                  color: PRIMARY,
-                  fontSize: 13,
-                  cursor: "pointer",
-                  fontWeight: 500,
-                  textDecoration: "underline",
-                  fontFamily: "'DM Sans', sans-serif",
-                }}
-              >
-                edit
-              </button>
-            </div>
-
-            <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
-              {(
-                [
-                  { key: "minimal", label: "Guide me", desc: "I do most of the work" },
-                  { key: "moderate", label: "Balanced", desc: "We split the work" },
-                  { key: "high", label: "Automate it", desc: "Agent does most" },
-                ] as const
-              ).map((opt) => (
-                <button
-                  key={opt.key}
-                  onClick={() => setAuthority(opt.key)}
-                  style={{
-                    flex: 1,
-                    padding: "14px 12px",
-                    borderRadius: 12,
-                    border: `2px solid ${authority === opt.key ? PRIMARY : "#e8e6f0"}`,
-                    background: authority === opt.key ? `${PRIMARY}0a` : "#fff",
-                    cursor: "pointer",
-                    textAlign: "center",
-                    fontFamily: "'DM Sans', sans-serif",
-                  }}
-                >
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a2e" }}>
-                    {opt.label}
-                  </div>
-                  <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>{opt.desc}</div>
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={handleClarify}
-              style={{
-                padding: "12px 32px",
-                border: "none",
-                borderRadius: 10,
-                background: PRIMARY,
-                color: "#fff",
-                fontSize: 15,
-                fontWeight: 600,
-                cursor: "pointer",
                 fontFamily: "'DM Sans', sans-serif",
               }}
             >
@@ -1761,6 +1737,7 @@ export default function Home() {
                       onMarkDone={markDone}
                       onRunAgent={handleRunAgent}
                       projectSummary={plan?.summary || brief}
+                      autoExpandSubtasks
                     />
 
                     {/* What's happening in the background */}

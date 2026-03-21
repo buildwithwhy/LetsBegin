@@ -11,6 +11,7 @@ export interface Task {
   energy: Energy;
   status: Status;
   depends_on: string[];
+  subtasks?: string[];
 }
 
 export interface ParallelGroup {
