@@ -251,7 +251,7 @@ function AgentPanel({
                   whiteSpace: "pre-wrap",
                 }}
               >
-                {s.content}
+                <SimpleMarkdown text={s.content} color={TEXT} />
               </div>
             )}
           </div>
@@ -2153,10 +2153,102 @@ export default function Home() {
                     })()}
                   </div>
                 ) : (
-                  <div style={{ textAlign: "center", padding: "30px 0", color: TEXT_LIGHT }}>
-                    <p style={{ fontSize: 14 }}>
-                      No tasks need your attention right now. The agent is working.
-                    </p>
+                  <div style={{ padding: "20px 0" }}>
+                    <div style={{ textAlign: "center", marginBottom: 20 }}>
+                      <div style={{ fontSize: 14, color: TEXT_LIGHT, marginBottom: 4 }}>
+                        No tasks need your attention right now.
+                      </div>
+                      {runningCount > 0 && (
+                        <div style={{ fontSize: 13, color: PRIMARY, fontWeight: 500 }}>
+                          {runningCount === 1 ? "An agent is working on a task..." : `${runningCount} agents are working...`}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Show what agents are currently working on */}
+                    {(() => {
+                      const agentWorking = allCurrentTasks.filter(
+                        (t) => t.assignee === "agent" && t.status === "pending" && results[t.id]
+                      );
+                      if (agentWorking.length === 0) return null;
+                      return (
+                        <div>
+                          <div style={{ fontSize: 12, color: "#B0AFA8", fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                            Agents working on
+                          </div>
+                          {agentWorking.map((t) => (
+                            <div
+                              key={t.id}
+                              style={{
+                                background: SURFACE,
+                                border: `1px solid ${BORDER}`,
+                                borderRadius: 10,
+                                padding: 14,
+                                marginBottom: 8,
+                              }}
+                            >
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                                <span style={{ width: 8, height: 8, borderRadius: "50%", background: PRIMARY, animation: "pulse 1.5s ease-in-out infinite" }} />
+                                <span style={{ fontSize: 13, fontWeight: 600 }}>{t.title}</span>
+                              </div>
+                              {results[t.id] && (
+                                <div style={{
+                                  fontSize: 12,
+                                  color: TEXT_LIGHT,
+                                  background: "#1C1C1E",
+                                  borderRadius: 6,
+                                  padding: 10,
+                                  maxHeight: 80,
+                                  overflow: "hidden",
+                                  fontFamily: "'DM Mono', monospace",
+                                }}>
+                                  {results[t.id].steps
+                                    .filter((s) => s.type === "thinking")
+                                    .map((s) => s.type === "thinking" ? s.text : "")
+                                    .join("")
+                                    .slice(-200) || "Starting..."}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Show upcoming human tasks so user knows what's next */}
+                    {(() => {
+                      const lockedHumanTasks = allCurrentTasks.filter(
+                        (t) => t.status === "locked" && (t.assignee === "user" || t.assignee === "hybrid")
+                      );
+                      if (lockedHumanTasks.length === 0) return null;
+                      return (
+                        <div style={{ marginTop: 16 }}>
+                          <div style={{ fontSize: 12, color: "#B0AFA8", fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                            Coming up for you
+                          </div>
+                          {lockedHumanTasks.slice(0, 3).map((t) => (
+                            <div
+                              key={t.id}
+                              style={{
+                                padding: "8px 12px",
+                                borderRadius: 8,
+                                background: SURFACE,
+                                border: `1px solid ${BORDER}`,
+                                marginBottom: 6,
+                                fontSize: 13,
+                                color: TEXT_LIGHT,
+                                opacity: 0.6,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                              }}
+                            >
+                              &#x1F512; {t.title}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
