@@ -63,7 +63,7 @@ export async function POST(req: Request) {
 
   const model = coding
     ? anthropic("claude-sonnet-4-6")
-    : google("gemini-2.5-flash-preview-04-17");
+    : google("gemini-2.5-flash");
 
   const modelLabel = coding ? "claude-sonnet" : "gemini-flash";
 

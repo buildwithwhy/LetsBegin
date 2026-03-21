@@ -584,11 +584,23 @@ export default function Home() {
   const [brief, setBrief] = useState("");
   const [authority, setAuthority] = useState<"minimal" | "moderate" | "high">("moderate");
   const [thinkingText, setThinkingText] = useState("");
+  const [compileStatus, setCompileStatus] = useState("");
+  const [compileStartTime, setCompileStartTime] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
   const [energyFilter, setEnergyFilter] = useState<Energy | "all">("all");
 
   const { execute, results, running } = useAgentExecutor();
+
+  // Elapsed timer for compiling phase
+  useEffect(() => {
+    if (compileStartTime === null) return;
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - compileStartTime) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [compileStartTime]);
 
   const allTasks = plan ? getAllTasks(plan.nodes) : [];
   const total = allTasks.length;
@@ -626,6 +638,9 @@ export default function Home() {
   const handleCompile = async () => {
     setStep("compiling");
     setThinkingText("");
+    setCompileStatus("Thinking through your brief...");
+    setCompileStartTime(Date.now());
+    setElapsed(0);
 
     try {
       const res = await fetch("/api/compile", {
@@ -654,11 +669,15 @@ export default function Home() {
             const event = JSON.parse(line);
             if (event.type === "thought") {
               setThinkingText((prev) => prev + event.text);
+            } else if (event.type === "status") {
+              setCompileStatus(event.text);
             } else if (event.type === "plan") {
+              setCompileStartTime(null);
               setPlan(event.plan);
               setStep("reveal");
             } else if (event.type === "error") {
               console.error("Compile error:", event.text);
+              setCompileStartTime(null);
             }
           } catch {
             // skip malformed lines
@@ -667,6 +686,7 @@ export default function Home() {
       }
     } catch (err) {
       console.error("Compile failed:", err);
+      setCompileStartTime(null);
       setStep("calibrate");
     }
   };
@@ -922,18 +942,23 @@ export default function Home() {
         {/* ─── COMPILING ─── */}
         {step === "compiling" && (
           <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-              <div
-                style={{
-                  width: 20,
-                  height: 20,
-                  border: `3px solid ${PRIMARY}`,
-                  borderTopColor: "transparent",
-                  borderRadius: "50%",
-                  animation: "spin 0.8s linear infinite",
-                }}
-              />
-              <span style={{ fontSize: 16, fontWeight: 600 }}>Compiling your plan...</span>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div
+                  style={{
+                    width: 20,
+                    height: 20,
+                    border: `3px solid ${PRIMARY}`,
+                    borderTopColor: "transparent",
+                    borderRadius: "50%",
+                    animation: "spin 0.8s linear infinite",
+                  }}
+                />
+                <span style={{ fontSize: 16, fontWeight: 600 }}>{compileStatus}</span>
+              </div>
+              <span style={{ fontSize: 13, color: "#999", fontVariantNumeric: "tabular-nums" }}>
+                {elapsed}s
+              </span>
             </div>
             <ThinkingTerminal text={thinkingText} />
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

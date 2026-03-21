@@ -42,12 +42,12 @@ function authorityPrompt(authority: "minimal" | "moderate" | "high"): string {
 export async function* streamThinking(
   brief: string,
   authority: "minimal" | "moderate" | "high"
-): AsyncGenerator<{ type: "thought"; text: string } | { type: "plan"; plan: Plan }> {
+): AsyncGenerator<{ type: "thought"; text: string } | { type: "status"; text: string } | { type: "plan"; plan: Plan }> {
   const authNote = authorityPrompt(authority);
 
   // Phase 1: Think out loud
   const thinkingResult = streamText({
-    model: google("gemini-2.5-flash-preview-04-17"),
+    model: google("gemini-2.5-flash"),
     prompt: `You are a project planning assistant. A user has given you this project brief:
 
 "${brief}"
@@ -67,9 +67,12 @@ Keep each observation to 1-2 sentences. Be practical and specific.`,
     yield { type: "thought", text: chunk };
   }
 
+  // Signal transition to Phase 2
+  yield { type: "status", text: "Structuring your plan..." };
+
   // Phase 2: Generate structured plan
   const planResult = await generateObject({
-    model: google("gemini-2.5-flash-preview-04-17"),
+    model: google("gemini-2.5-flash"),
     schema: planSchema,
     prompt: `You are a project planning assistant. A user has given you this project brief:
 
