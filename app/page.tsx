@@ -5,7 +5,9 @@ import {
   type Plan,
   type DagNode,
   type Task,
+  type Subtask,
   type Energy,
+  type Assignee,
   type Status,
   getAllTasks,
   computeUnlocked,
@@ -593,8 +595,34 @@ function TaskChat({
 
 // ─── SubtaskList ───
 
-function SubtaskList({ subtasks, autoExpand = false }: { subtasks: string[]; autoExpand?: boolean }) {
+function SubtaskList({
+  subtasks,
+  autoExpand = false,
+  doneSubtaskIds,
+  onToggleSubtask,
+}: {
+  subtasks: Subtask[];
+  autoExpand?: boolean;
+  doneSubtaskIds: Set<string>;
+  onToggleSubtask: (subtaskId: string) => void;
+}) {
   const [expanded, setExpanded] = useState(autoExpand);
+  const doneCount = subtasks.filter((st) => doneSubtaskIds.has(st.id)).length;
+
+  // Group parallel subtasks together
+  const rendered = new Set<string>();
+  const groups: (Subtask | Subtask[])[] = [];
+  for (const st of subtasks) {
+    if (rendered.has(st.id)) continue;
+    if (st.parallel_with && st.parallel_with.length > 0) {
+      const parallel = [st, ...subtasks.filter((s) => st.parallel_with?.includes(s.id) && !rendered.has(s.id))];
+      parallel.forEach((p) => rendered.add(p.id));
+      groups.push(parallel);
+    } else {
+      rendered.add(st.id);
+      groups.push(st);
+    }
+  }
 
   return (
     <div style={{ marginBottom: 10 }}>
@@ -609,47 +637,96 @@ function SubtaskList({ subtasks, autoExpand = false }: { subtasks: string[]; aut
           cursor: "pointer",
           fontWeight: 500,
           fontFamily: "'DM Sans', sans-serif",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
         }}
       >
         {expanded ? "\u25BC" : "\u25B6"} {subtasks.length} steps
+        {doneCount > 0 && (
+          <span style={{ color: "#2a9d6e", fontWeight: 400 }}>
+            ({doneCount}/{subtasks.length} done)
+          </span>
+        )}
       </button>
       {expanded && (
-        <div style={{ marginTop: 8, paddingLeft: 4 }}>
-          {subtasks.map((st, i) => (
-            <div
-              key={i}
-              style={{
-                display: "flex",
-                gap: 8,
-                alignItems: "flex-start",
-                marginBottom: 6,
-                fontSize: 12,
-                color: "#666",
-                lineHeight: 1.5,
-              }}
-            >
-              <span
-                style={{
-                  minWidth: 18,
-                  height: 18,
-                  borderRadius: "50%",
-                  border: "1.5px solid #ddd",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 10,
-                  color: "#bbb",
-                  flexShrink: 0,
-                  marginTop: 1,
-                }}
-              >
-                {i + 1}
-              </span>
-              {st}
-            </div>
-          ))}
+        <div style={{ marginTop: 8, paddingLeft: 2 }}>
+          {groups.map((group, gi) => {
+            if (Array.isArray(group)) {
+              return (
+                <div key={gi}>
+                  <div style={{ fontSize: 10, color: "#bbb", marginBottom: 4, marginTop: gi > 0 ? 8 : 0, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    Can do at the same time:
+                  </div>
+                  <div style={{ borderLeft: `2px solid ${PRIMARY}22`, paddingLeft: 10, marginBottom: 6 }}>
+                    {group.map((st) => (
+                      <SubtaskItem key={st.id} st={st} done={doneSubtaskIds.has(st.id)} onToggle={onToggleSubtask} />
+                    ))}
+                  </div>
+                </div>
+              );
+            }
+            return <SubtaskItem key={group.id} st={group} done={doneSubtaskIds.has(group.id)} onToggle={onToggleSubtask} />;
+          })}
         </div>
       )}
+    </div>
+  );
+}
+
+function SubtaskItem({ st, done, onToggle }: { st: Subtask; done: boolean; onToggle: (id: string) => void }) {
+  const isAgent = st.assignee === "agent";
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 8,
+        alignItems: "flex-start",
+        marginBottom: 6,
+        fontSize: 12,
+        color: done ? "#bbb" : "#666",
+        lineHeight: 1.5,
+        opacity: done ? 0.6 : 1,
+      }}
+    >
+      <button
+        onClick={() => onToggle(st.id)}
+        style={{
+          minWidth: 18,
+          height: 18,
+          borderRadius: 4,
+          border: done ? "none" : "1.5px solid #ddd",
+          background: done ? "#2a9d6e" : "transparent",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 10,
+          color: done ? "#fff" : "#bbb",
+          flexShrink: 0,
+          marginTop: 1,
+          cursor: "pointer",
+          padding: 0,
+        }}
+      >
+        {done ? "\u2713" : ""}
+      </button>
+      <span style={{ textDecoration: done ? "line-through" : "none", flex: 1 }}>
+        {st.title}
+      </span>
+      <span
+        style={{
+          fontSize: 9,
+          fontWeight: 600,
+          padding: "1px 5px",
+          borderRadius: 4,
+          background: isAgent ? `${PRIMARY}14` : "#e8e6f0",
+          color: isAgent ? PRIMARY : "#888",
+          flexShrink: 0,
+          marginTop: 2,
+        }}
+      >
+        {isAgent ? "AI" : "You"}
+      </span>
     </div>
   );
 }
@@ -663,6 +740,8 @@ function TaskCard({
   onRunAgent,
   projectSummary,
   autoExpandSubtasks = false,
+  doneSubtaskIds,
+  onToggleSubtask,
 }: {
   task: Task;
   result?: AgentResult;
@@ -670,6 +749,8 @@ function TaskCard({
   onRunAgent: (task: Task) => void;
   projectSummary: string;
   autoExpandSubtasks?: boolean;
+  doneSubtaskIds: Set<string>;
+  onToggleSubtask: (id: string) => void;
 }) {
   const isLocked = task.status === "locked";
   const isDone = task.status === "done";
@@ -729,7 +810,12 @@ function TaskCard({
       </div>
 
       {task.subtasks && task.subtasks.length > 0 && isPending && (
-        <SubtaskList subtasks={task.subtasks} autoExpand={autoExpandSubtasks} />
+        <SubtaskList
+          subtasks={task.subtasks}
+          autoExpand={autoExpandSubtasks}
+          doneSubtaskIds={doneSubtaskIds}
+          onToggleSubtask={onToggleSubtask}
+        />
       )}
 
       {isPending && !result && (task.assignee === "agent" || task.assignee === "hybrid") && (
@@ -794,26 +880,38 @@ function TaskCard({
 function DagView({
   nodes,
   energyFilter,
+  assigneeFilter,
   results,
   onMarkDone,
   onRunAgent,
   projectSummary,
+  doneSubtaskIds,
+  onToggleSubtask,
 }: {
   nodes: DagNode[];
   energyFilter: Energy | "all";
+  assigneeFilter: Assignee | "all";
   results: Record<string, AgentResult>;
   onMarkDone: (id: string) => void;
   onRunAgent: (task: Task) => void;
   projectSummary: string;
+  doneSubtaskIds: Set<string>;
+  onToggleSubtask: (id: string) => void;
 }) {
   const [view, setView] = useState<"steps" | "graph">("steps");
 
-  const filteredNodes = energyFilter === "all"
+  const matchesFilters = (t: Task) => {
+    if (energyFilter !== "all" && t.energy !== energyFilter) return false;
+    if (assigneeFilter !== "all" && t.assignee !== assigneeFilter) return false;
+    return true;
+  };
+
+  const filteredNodes = (energyFilter === "all" && assigneeFilter === "all")
     ? nodes
     : nodes
         .map((n) => {
-          if (n.type === "task") return n.energy === energyFilter ? n : null;
-          const filtered = n.children.filter((c) => c.energy === energyFilter);
+          if (n.type === "task") return matchesFilters(n) ? n : null;
+          const filtered = n.children.filter(matchesFilters);
           if (filtered.length === 0) return null;
           return { ...n, children: filtered };
         })
@@ -868,6 +966,8 @@ function DagView({
                   onMarkDone={onMarkDone}
                   onRunAgent={onRunAgent}
                   projectSummary={projectSummary}
+                  doneSubtaskIds={doneSubtaskIds}
+                  onToggleSubtask={onToggleSubtask}
                 />
               );
             }
@@ -901,6 +1001,8 @@ function DagView({
                       onMarkDone={onMarkDone}
                       onRunAgent={onRunAgent}
                       projectSummary={projectSummary}
+                      doneSubtaskIds={doneSubtaskIds}
+                      onToggleSubtask={onToggleSubtask}
                     />
                   ))}
                 </div>
@@ -989,6 +1091,8 @@ export default function Home() {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
   const [energyFilter, setEnergyFilter] = useState<Energy | "all">("all");
+  const [assigneeFilter, setAssigneeFilter] = useState<Assignee | "all">("all");
+  const [doneSubtaskIds, setDoneSubtaskIds] = useState<Set<string>>(new Set());
 
   const { execute, results, running } = useAgentExecutor();
 
@@ -1017,6 +1121,15 @@ export default function Home() {
     },
     []
   );
+
+  const toggleSubtask = useCallback((subtaskId: string) => {
+    setDoneSubtaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(subtaskId)) next.delete(subtaskId);
+      else next.add(subtaskId);
+      return next;
+    });
+  }, []);
 
   // Auto-complete agent tasks when result is done
   useEffect(() => {
@@ -1894,6 +2007,8 @@ export default function Home() {
                       onRunAgent={handleRunAgent}
                       projectSummary={plan?.summary || brief}
                       autoExpandSubtasks
+                      doneSubtaskIds={doneSubtaskIds}
+                      onToggleSubtask={toggleSubtask}
                     />
 
                     {/* What's happening in the background */}
@@ -2015,38 +2130,71 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Energy filter */}
-                <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-                  {(["all", "high", "medium", "low"] as const).map((e) => (
-                    <button
-                      key={e}
-                      onClick={() => setEnergyFilter(e)}
-                      style={{
-                        padding: "5px 12px",
-                        borderRadius: 6,
-                        border: "none",
-                        background: energyFilter === e ? (e === "all" ? PRIMARY : ENERGY_COLORS[e]) : "#e8e6f0",
-                        color: energyFilter === e ? "#fff" : "#666",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        textTransform: "capitalize",
-                        fontFamily: "'DM Sans', sans-serif",
-                      }}
-                    >
-                      {e}
-                    </button>
-                  ))}
+                {/* Filters */}
+                <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: "#aaa", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Effort</span>
+                    {(["all", "high", "medium", "low"] as const).map((e) => (
+                      <button
+                        key={e}
+                        onClick={() => setEnergyFilter(e)}
+                        style={{
+                          padding: "4px 10px",
+                          borderRadius: 6,
+                          border: "none",
+                          background: energyFilter === e ? (e === "all" ? PRIMARY : ENERGY_COLORS[e]) : "#e8e6f0",
+                          color: energyFilter === e ? "#fff" : "#666",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          textTransform: "capitalize",
+                          fontFamily: "'DM Sans', sans-serif",
+                        }}
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: "#aaa", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Who</span>
+                    {([
+                      { key: "all" as const, label: "All" },
+                      { key: "agent" as const, label: "\u26A1 Agent" },
+                      { key: "hybrid" as const, label: "\uD83E\uDD1D Hybrid" },
+                      { key: "user" as const, label: "\uD83D\uDC64 You" },
+                    ]).map((f) => (
+                      <button
+                        key={f.key}
+                        onClick={() => setAssigneeFilter(f.key)}
+                        style={{
+                          padding: "4px 10px",
+                          borderRadius: 6,
+                          border: "none",
+                          background: assigneeFilter === f.key ? PRIMARY : "#e8e6f0",
+                          color: assigneeFilter === f.key ? "#fff" : "#666",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          fontFamily: "'DM Sans', sans-serif",
+                        }}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* DAG view */}
                 <DagView
                   nodes={currentNodes}
                   energyFilter={energyFilter}
+                  assigneeFilter={assigneeFilter}
                   results={results}
                   onMarkDone={markDone}
                   onRunAgent={handleRunAgent}
                   projectSummary={plan?.summary || brief}
+                  doneSubtaskIds={doneSubtaskIds}
+                  onToggleSubtask={toggleSubtask}
                 />
               </div>
             )}

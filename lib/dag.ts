@@ -2,6 +2,14 @@ export type Energy = "high" | "medium" | "low";
 export type Assignee = "agent" | "user" | "hybrid";
 export type Status = "locked" | "pending" | "done" | "skipped";
 
+export interface Subtask {
+  id: string;
+  title: string;
+  assignee: "agent" | "user";
+  depends_on: string[]; // ids of other subtasks within the same task
+  parallel_with?: string[]; // ids of subtasks that can run simultaneously
+}
+
 export interface Task {
   id: string;
   type: "task";
@@ -11,7 +19,7 @@ export interface Task {
   energy: Energy;
   status: Status;
   depends_on: string[];
-  subtasks?: string[];
+  subtasks?: Subtask[];
 }
 
 export interface ParallelGroup {

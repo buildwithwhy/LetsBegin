@@ -30,20 +30,30 @@ const planSchema = z.object({
 });
 
 // Schema for subtasks enrichment
+const subtaskItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  assignee: z.enum(["agent", "user"]),
+  depends_on: z.array(z.string()),
+  parallel_with: z.array(z.string()).optional(),
+});
+
 const subtasksSchema = z.object({
   tasks: z.array(
     z.object({
       id: z.string(),
-      subtasks: z.array(z.string()),
+      subtasks: z.array(subtaskItemSchema),
     })
   ),
 });
+
+type SubtaskData = z.infer<typeof subtaskItemSchema>;
 
 export type CompilerEvent =
   | { type: "thought"; text: string }
   | { type: "status"; text: string }
   | { type: "plan"; plan: Plan }
-  | { type: "subtasks"; tasks: { id: string; subtasks: string[] }[] }
+  | { type: "subtasks"; tasks: { id: string; subtasks: SubtaskData[] }[] }
   | { type: "error"; text: string };
 
 type ImageInput = { mediaType: string; data: string };
@@ -133,7 +143,7 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
 
     try {
       const taskList = humanTasks
-        .map((t) => `- id: "${t.id}", title: "${t.title}", description: "${t.description}"`)
+        .map((t) => `- id: "${t.id}", title: "${t.title}", assignee: "${t.assignee}", description: "${t.description}"`)
         .join("\n");
 
       const subtasksResult = await generateObject({
@@ -146,13 +156,18 @@ Project: "${brief}"
 Tasks that need subtasks:
 ${taskList}
 
-For each task, generate 3-8 specific, actionable sub-steps.
-Sub-steps should be specific enough that someone unfamiliar with the process can follow them.
-For example, instead of "set up account", write "Go to developer.apple.com and click 'Enroll'".
+For each task, generate 3-8 subtasks. Each subtask must have:
+- id: unique within the task (e.g., "step-1", "step-2")
+- title: specific, actionable step (e.g., "Go to developer.apple.com and click 'Enroll'")
+- assignee: "user" for steps that require human action (clicking, logging in, decisions), "agent" for steps that AI can handle (drafting text, generating content, research)
+- depends_on: array of subtask ids that must complete first (use [] for the first step)
+- parallel_with: array of subtask ids that can be done at the same time (optional, omit if sequential)
 
-The brief may contain context from clarifying questions about the user's experience level — use this to calibrate detail. More detail for beginners, less for experienced users.
+For hybrid tasks, clearly split which subtasks are "agent" (drafting, generating) vs "user" (reviewing, approving, submitting).
 
-Return the task id and its subtasks array for each task.`,
+The brief may contain context from clarifying questions about the user's experience level — calibrate detail accordingly.
+
+Return the parent task id and its subtasks array for each task.`,
       });
 
       yield { type: "subtasks", tasks: subtasksResult.object.tasks };
