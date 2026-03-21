@@ -31,11 +31,18 @@ export async function POST(req: Request) {
 
 "${brief}"
 
-Generate 3-5 clarifying questions that would help you build a better plan. Focus on:
+Generate 4-6 clarifying questions that would help you build a better plan. Include TWO categories of questions:
+
+CATEGORY 1 — Project-specific questions (2-3 questions):
 - What access, accounts, or tools they already have set up
 - Their experience level with key technologies or processes involved
 - Any constraints (timeline, budget, team size)
 - Decisions that would significantly change the plan structure
+
+CATEGORY 2 — Human calibration questions (2 questions):
+These help you understand HOW to structure tasks for this specific person:
+- Ask about their preferred task granularity. Example: "When you get a task like 'set up a developer account', do you prefer it broken into small steps (go to this URL, click this button) or just the goal?" with options like "Small detailed steps", "Just the key milestones", "Just tell me the goal"
+- Ask about their experience or comfort level with the domain so you know whether to add explanatory context. Example: "How familiar are you with [the key domain in the brief]?" with options like "Never done it", "Done it once or twice", "Very comfortable"
 
 Rules:
 - Keep questions concise and conversational
@@ -43,8 +50,8 @@ Rules:
 - Use "choice" type when there are 2-4 clear options (provide them in "options")
 - Use "short" type only when a brief free-text answer is needed
 - Prefer yes_no and choice over short — they're faster to answer
-- Each question needs a unique id (short slug like "has-account", "exp-level")
-- Order questions from most impactful to least impactful
+- Each question needs a unique id (short slug like "has-account", "task-detail")
+- Put the most impactful project questions first, then the calibration questions
 - Don't ask obvious questions or things you can infer from the brief`,
     });
 
