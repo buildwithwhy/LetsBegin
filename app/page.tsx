@@ -1383,10 +1383,10 @@ export default function Home() {
               What are we building?
             </h1>
             <p style={{ color: "#787774", fontSize: 16, marginBottom: 28, lineHeight: 1.6 }}>
-              Most AI tools do the work <em>for you</em>{" "}
-              or leave you to figure it out alone. LetsBegin does neither — it
-              splits your project into a clear plan where you and the AI each
-              handle what you&apos;re best at, one task at a time.
+              AI tools either do everything for you or leave you in a chat guessing
+              what to do next. LetsBegin coordinates — it builds a plan where agents
+              work in the background while you get guided through your part, one
+              thing at a time.
             </p>
 
             <div
@@ -1401,17 +1401,17 @@ export default function Home() {
                 {
                   num: "1",
                   title: "Describe it messy",
-                  desc: "Paste your goal in plain language, attach screenshots or sketches. No structure needed.",
+                  desc: "Paste your goal, attach screenshots. AI asks a few smart questions to understand your situation.",
                 },
                 {
                   num: "2",
-                  title: "Get a real plan",
-                  desc: "AI compiles a dependency-aware task graph — computed once, not regenerated.",
+                  title: "Get a dependency graph",
+                  desc: "AI compiles a real plan — not a to-do list. Tasks that can run in parallel do, and nothing blocks unnecessarily.",
                 },
                 {
                   num: "3",
-                  title: "Work through it together",
-                  desc: "Each task is tagged: AI handles it, you handle it, or AI drafts and you review.",
+                  title: "You and AI, in parallel",
+                  desc: "Agents auto-run their tasks while you focus on yours. One thing at a time, never overwhelmed.",
                 },
               ].map((s) => (
                 <div
@@ -1465,23 +1465,26 @@ export default function Home() {
                   listStyle: "none",
                 }}
               >
-                How is this different? &darr;
+                Not another chatbot &darr;
               </summary>
               <div style={{ paddingBottom: 16, fontSize: 13, color: "#787774", lineHeight: 1.7 }}>
                 <p style={{ margin: "0 0 10px" }}>
-                  <strong>You never lose the big picture.</strong> A progress bar tracks
-                  where you are across the whole project — not just the current chat turn.
+                  <strong>Unlike chat:</strong> Your project has structure. A progress bar, a
+                  dependency graph, and a stable plan that doesn&apos;t regenerate every message.
                 </p>
                 <p style={{ margin: "0 0 10px" }}>
-                  <strong>Dependencies keep you unblocked.</strong> Tasks are organized as a
-                  graph, not a list. When one task is done, the next ones that depend on it
-                  unlock automatically. Parallel tasks show up together so you can tackle
-                  them in any order.
+                  <strong>Unlike coding agents:</strong> LetsBegin handles the whole project — not
+                  just the code parts. It knows when a human needs to sign up for an account,
+                  make a decision, or review a draft.
+                </p>
+                <p style={{ margin: "0 0 10px" }}>
+                  <strong>Unlike task managers:</strong> Tasks actually get done. Agents auto-execute
+                  their work in the background while you focus on what only you can do.
                 </p>
                 <p style={{ margin: 0 }}>
-                  <strong>The plan is stable.</strong> Your task graph is compiled once from
-                  your brief — it doesn&apos;t shift every time the AI responds. You decide
-                  how much the agent handles, and you always review before anything moves forward.
+                  <strong>Designed for real humans:</strong> One task at a time. Step-by-step
+                  guidance when you need it. Big tasks broken into small, concrete actions. Built
+                  for people who find it hard to start, not just people who want to go faster.
                 </p>
               </div>
             </details>
