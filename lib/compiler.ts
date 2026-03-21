@@ -175,7 +175,17 @@ For each task, generate 3-8 subtasks. Each subtask must have:
 - depends_on: array of subtask ids that must complete first (use [] for the first step)
 - parallel_with: array of subtask ids that can be done at the same time (optional, omit if sequential)
 
-For hybrid tasks, clearly split which subtasks are "agent" (drafting, generating) vs "user" (reviewing, approving, submitting).
+IMPORTANT RULES BY TASK TYPE:
+
+For "user" tasks: all subtasks should be assignee "user". These are human-only tasks.
+
+For "hybrid" tasks — CLEAN HANDOFF, NO PING-PONG:
+- ALL agent subtasks come FIRST (drafting, generating, researching)
+- ALL user subtasks come AFTER (reviewing, approving, using the output)
+- Never alternate agent→user→agent→user. The agent does its batch, then the human does theirs.
+- User subtasks in hybrid tasks should be about REVIEWING and ACTING ON what the agent produced, not about making choices the agent should have handled.
+- If the agent generates options, the agent should present them — the user's subtask is "Review and approve" not "Choose between options".
+- Mark agent subtasks as parallel_with each other if they can run simultaneously.
 
 The brief may contain context from clarifying questions about the user's experience level — calibrate detail accordingly.
 
