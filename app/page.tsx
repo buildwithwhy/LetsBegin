@@ -577,12 +577,23 @@ function energyDot(e: Energy) {
 
 // ─── Main Page ───
 
-type Step = "input" | "calibrate" | "compiling" | "reveal";
+type ClarifyQuestion = {
+  id: string;
+  question: string;
+  type: "yes_no" | "choice" | "short";
+  options?: string[];
+};
+
+type Step = "input" | "calibrate" | "clarify" | "compiling" | "reveal";
 
 export default function Home() {
   const [step, setStep] = useState<Step>("input");
   const [brief, setBrief] = useState("");
+  const [attachments, setAttachments] = useState<{ name: string; dataUrl: string }[]>([]);
   const [authority, setAuthority] = useState<"minimal" | "moderate" | "high">("moderate");
+  const [questions, setQuestions] = useState<ClarifyQuestion[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [clarifyLoading, setClarifyLoading] = useState(false);
   const [thinkingText, setThinkingText] = useState("");
   const [compileStatus, setCompileStatus] = useState("");
   const [compileStartTime, setCompileStartTime] = useState<number | null>(null);
@@ -635,6 +646,61 @@ export default function Home() {
     execute(task.id, task.title, task.description, plan?.summary || brief);
   };
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setAttachments((prev) => [
+          ...prev,
+          { name: file.name, dataUrl: reader.result as string },
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleClarify = async () => {
+    setClarifyLoading(true);
+    setStep("clarify");
+    try {
+      const res = await fetch("/api/clarify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brief }),
+      });
+      const data = await res.json();
+      setQuestions(data.questions || []);
+      const initialAnswers: Record<string, string> = {};
+      (data.questions || []).forEach((q: ClarifyQuestion) => {
+        if (q.type === "yes_no") initialAnswers[q.id] = "";
+        else initialAnswers[q.id] = "";
+      });
+      setAnswers(initialAnswers);
+    } catch (err) {
+      console.error("Clarify failed:", err);
+    } finally {
+      setClarifyLoading(false);
+    }
+  };
+
+  const buildEnrichedBrief = () => {
+    let enriched = brief;
+    const answered = Object.entries(answers).filter(([, v]) => v);
+    if (answered.length > 0) {
+      enriched += "\n\nAdditional context from user:";
+      for (const [qId, answer] of answered) {
+        const q = questions.find((q) => q.id === qId);
+        if (q) enriched += `\n- ${q.question} → ${answer}`;
+      }
+    }
+    return enriched;
+  };
+
   const handleCompile = async () => {
     setStep("compiling");
     setThinkingText("");
@@ -642,11 +708,13 @@ export default function Home() {
     setCompileStartTime(Date.now());
     setElapsed(0);
 
+    const enrichedBrief = buildEnrichedBrief();
+
     try {
       const res = await fetch("/api/compile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief, authority }),
+        body: JSON.stringify({ brief: enrichedBrief, authority, attachments }),
       });
 
       const reader = res.body?.getReader();
@@ -728,7 +796,7 @@ export default function Home() {
                 {
                   num: "1",
                   title: "Describe it messy",
-                  desc: "Paste your goal in plain language. No structure needed.",
+                  desc: "Paste your goal in plain language, attach screenshots or sketches. No structure needed.",
                 },
                 {
                   num: "2",
@@ -834,6 +902,75 @@ export default function Home() {
               onFocus={(e) => (e.target.style.borderColor = PRIMARY)}
               onBlur={(e) => (e.target.style.borderColor = "#e8e6f0")}
             />
+
+            {/* Attachments */}
+            <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleFileAdd}
+                style={{ display: "none" }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                style={{
+                  padding: "6px 14px",
+                  border: "1px dashed #ccc",
+                  borderRadius: 8,
+                  background: "transparent",
+                  color: "#888",
+                  fontSize: 13,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                + Attach images
+              </button>
+              {attachments.map((att, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "4px 10px",
+                    borderRadius: 6,
+                    background: "#f0eef8",
+                    fontSize: 12,
+                    color: "#555",
+                  }}
+                >
+                  <img
+                    src={att.dataUrl}
+                    alt={att.name}
+                    style={{ width: 24, height: 24, borderRadius: 4, objectFit: "cover" }}
+                  />
+                  {att.name}
+                  <button
+                    onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#999",
+                      cursor: "pointer",
+                      fontSize: 14,
+                      padding: 0,
+                      lineHeight: 1,
+                    }}
+                  >
+                    &times;
+                  </button>
+                </div>
+              ))}
+            </div>
+            {attachments.length > 0 && (
+              <div style={{ marginTop: 6, fontSize: 11, color: "#999" }}>
+                Images will be analyzed by Gemini to understand your project context.
+              </div>
+            )}
+
             <button
               onClick={() => setStep("calibrate")}
               disabled={brief.trim().length < 10}
@@ -875,6 +1012,11 @@ export default function Home() {
             >
               <span style={{ fontWeight: 600, color: "#1a1a2e" }}>Your brief: </span>
               {brief}
+              {attachments.length > 0 && (
+                <span style={{ color: "#888", fontSize: 12, marginLeft: 8 }}>
+                  + {attachments.length} image{attachments.length > 1 ? "s" : ""} attached
+                </span>
+              )}
               <button
                 onClick={() => setStep("input")}
                 style={{
@@ -924,7 +1066,7 @@ export default function Home() {
             </div>
 
             <button
-              onClick={handleCompile}
+              onClick={handleClarify}
               style={{
                 padding: "12px 32px",
                 border: "none",
@@ -937,8 +1079,160 @@ export default function Home() {
                 fontFamily: "'DM Sans', sans-serif",
               }}
             >
-              Build my plan &rarr;
+              Continue &rarr;
             </button>
+          </div>
+        )}
+
+        {/* ─── CLARIFY ─── */}
+        {step === "clarify" && (
+          <div>
+            <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>
+              A few quick questions
+            </h2>
+            <p style={{ color: "#666", fontSize: 14, marginBottom: 24 }}>
+              Help us tailor the plan to where you are. Skip any that don&apos;t apply.
+            </p>
+
+            {clarifyLoading ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 20 }}>
+                <div
+                  style={{
+                    width: 18,
+                    height: 18,
+                    border: `3px solid ${PRIMARY}`,
+                    borderTopColor: "transparent",
+                    borderRadius: "50%",
+                    animation: "spin 0.8s linear infinite",
+                  }}
+                />
+                <span style={{ fontSize: 14, color: "#666" }}>Generating questions...</span>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {questions.map((q) => (
+                  <div
+                    key={q.id}
+                    style={{
+                      background: "#fff",
+                      borderRadius: 12,
+                      padding: 18,
+                      border: "1px solid #e8e6f0",
+                    }}
+                  >
+                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>
+                      {q.question}
+                    </div>
+                    {q.type === "yes_no" && (
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {["Yes", "No"].map((opt) => (
+                          <button
+                            key={opt}
+                            onClick={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
+                            style={{
+                              padding: "6px 18px",
+                              borderRadius: 8,
+                              border: `2px solid ${answers[q.id] === opt ? PRIMARY : "#e8e6f0"}`,
+                              background: answers[q.id] === opt ? `${PRIMARY}0a` : "#fff",
+                              color: answers[q.id] === opt ? PRIMARY : "#666",
+                              fontSize: 13,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              fontFamily: "'DM Sans', sans-serif",
+                            }}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {q.type === "choice" && q.options && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {q.options.map((opt) => (
+                          <button
+                            key={opt}
+                            onClick={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
+                            style={{
+                              padding: "6px 14px",
+                              borderRadius: 8,
+                              border: `2px solid ${answers[q.id] === opt ? PRIMARY : "#e8e6f0"}`,
+                              background: answers[q.id] === opt ? `${PRIMARY}0a` : "#fff",
+                              color: answers[q.id] === opt ? PRIMARY : "#666",
+                              fontSize: 13,
+                              fontWeight: 500,
+                              cursor: "pointer",
+                              fontFamily: "'DM Sans', sans-serif",
+                            }}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {q.type === "short" && (
+                      <input
+                        type="text"
+                        value={answers[q.id] || ""}
+                        onChange={(e) =>
+                          setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
+                        }
+                        placeholder="Type your answer..."
+                        style={{
+                          width: "100%",
+                          padding: "8px 12px",
+                          fontSize: 13,
+                          fontFamily: "'DM Sans', sans-serif",
+                          borderRadius: 8,
+                          border: "2px solid #e8e6f0",
+                          outline: "none",
+                          boxSizing: "border-box",
+                        }}
+                        onFocus={(e) => (e.target.style.borderColor = PRIMARY)}
+                        onBlur={(e) => (e.target.style.borderColor = "#e8e6f0")}
+                      />
+                    )}
+                  </div>
+                ))}
+
+                <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+                  <button
+                    onClick={handleCompile}
+                    style={{
+                      padding: "12px 32px",
+                      border: "none",
+                      borderRadius: 10,
+                      background: PRIMARY,
+                      color: "#fff",
+                      fontSize: 15,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    Build my plan &rarr;
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAnswers({});
+                      handleCompile();
+                    }}
+                    style={{
+                      padding: "12px 20px",
+                      border: "none",
+                      borderRadius: 10,
+                      background: "transparent",
+                      color: "#888",
+                      fontSize: 14,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    Skip questions
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

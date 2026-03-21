@@ -46,18 +46,26 @@ export type CompilerEvent =
   | { type: "plan"; plan: Plan }
   | { type: "error"; text: string };
 
+type ImageInput = { mediaType: string; data: string };
+
 export async function* streamThinking(
   brief: string,
-  authority: "minimal" | "moderate" | "high"
+  authority: "minimal" | "moderate" | "high",
+  images: ImageInput[] = []
 ): AsyncGenerator<CompilerEvent> {
   const authNote = authorityPrompt(authority);
 
-  // Phase 1: Think out loud
-  const thinkingResult = streamText({
-    model: google("gemini-3-flash-preview"),
-    prompt: `You are a project planning assistant. A user has given you this project brief:
+  const imageContent = images.map((img) => ({
+    type: "image" as const,
+    image: img.data,
+    mimeType: img.mediaType,
+  }));
+
+  const thinkingPrompt = `You are a project planning assistant. A user has given you this project brief:
 
 "${brief}"
+
+${images.length > 0 ? "The user has also attached images for additional context. Analyze them and incorporate what you see into your observations." : ""}
 
 Think out loud about this brief. Make 4-6 short observations about:
 - What the key dependencies are (what must happen before what)
@@ -67,7 +75,20 @@ Think out loud about this brief. Make 4-6 short observations about:
 
 ${authNote}
 
-Keep each observation to 1-2 sentences. Be practical and specific.`,
+Keep each observation to 1-2 sentences. Be practical and specific.`;
+
+  // Phase 1: Think out loud
+  const thinkingResult = streamText({
+    model: google("gemini-3-flash-preview"),
+    messages: [
+      {
+        role: "user",
+        content: [
+          ...imageContent,
+          { type: "text" as const, text: thinkingPrompt },
+        ],
+      },
+    ],
   });
 
   for await (const chunk of thinkingResult.textStream) {
