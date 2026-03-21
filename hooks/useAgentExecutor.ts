@@ -32,9 +32,13 @@ export function useAgentExecutor() {
   const abortControllers = useRef<Map<string, AbortController>>(new Map());
 
   const execute = useCallback(
-    async (taskId: string, title: string, description: string, projectContext: string) => {
-      // Don't re-run if already running or completed
-      if (abortControllers.current.has(taskId)) return;
+    async (taskId: string, title: string, description: string, projectContext: string, assignee?: string, force?: boolean) => {
+      // Don't re-run if already running (unless forced for regenerate)
+      if (abortControllers.current.has(taskId)) {
+        if (!force) return;
+        abortControllers.current.get(taskId)?.abort();
+        abortControllers.current.delete(taskId);
+      }
 
       const controller = new AbortController();
       abortControllers.current.set(taskId, controller);
@@ -58,7 +62,7 @@ export function useAgentExecutor() {
         const res = await fetch("/api/execute", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ taskId, title, description, projectContext }),
+          body: JSON.stringify({ taskId, title, description, projectContext, assignee }),
           signal: controller.signal,
         });
 

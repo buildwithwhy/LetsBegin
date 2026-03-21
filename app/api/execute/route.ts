@@ -69,10 +69,17 @@ const writingTools = {
 };
 
 export async function POST(req: Request) {
-  const { taskId, title, description, projectContext } = await req.json();
+  const { taskId, title, description, projectContext, assignee } = await req.json();
 
   const taskType = detectTaskType(description);
   const { model, label } = selectModel(taskType);
+
+  const hybridNote = assignee === "hybrid"
+    ? `\n\nIMPORTANT: This is a HYBRID task — you draft, then a human reviews and decides.
+- When generating options or ideas, present ALL options clearly (numbered list) so the human can CHOOSE. Do NOT pick one for them.
+- When drafting content, present it as a draft for review, not a final decision.
+- Label your output clearly: "Here are 3 options for you to choose from:" or "Here's a draft for your review:"`
+    : "";
 
   const result = streamText({
     model,
@@ -84,7 +91,7 @@ Project context: ${projectContext || "No additional context"}
 
 Your current task:
 Title: ${title}
-Description: ${description}
+Description: ${description}${hybridNote}
 
 Complete this task using the available tools. Think through the approach, then use the appropriate tool(s) to produce your output. Be thorough but concise.`,
   });

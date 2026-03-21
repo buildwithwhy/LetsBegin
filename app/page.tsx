@@ -177,10 +177,12 @@ function ThinkingTerminal({ text }: { text: string }) {
 function AgentPanel({
   result,
   onApprove,
+  onRegenerate,
   showApprove,
 }: {
   result: AgentResult;
   onApprove?: () => void;
+  onRegenerate?: () => void;
   showApprove?: boolean;
 }) {
   const isClaude = result.model === "claude-sonnet";
@@ -286,23 +288,41 @@ function AgentPanel({
         <div style={{ color: "#CF522E", fontSize: 12, marginTop: 8 }}>Error: {result.error}</div>
       )}
       {showApprove && result.done && onApprove && (
-        <button
-          onClick={onApprove}
-          style={{
-            marginTop: 10,
-            padding: "8px 18px",
-            border: "none",
-            borderRadius: 8,
-            background: "#c4841d",
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "'DM Sans', sans-serif",
-          }}
-        >
-          Looks good, continue &rarr;
-        </button>
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button
+            onClick={onApprove}
+            style={{
+              padding: "8px 18px",
+              border: "none",
+              borderRadius: 8,
+              background: "#C4841D",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "'DM Sans', sans-serif",
+            }}
+          >
+            Looks good, continue &rarr;
+          </button>
+          {onRegenerate && (
+            <button
+              onClick={onRegenerate}
+              style={{
+                padding: "8px 14px",
+                border: `1px solid ${BORDER}`,
+                borderRadius: 8,
+                background: "transparent",
+                color: TEXT_LIGHT,
+                fontSize: 13,
+                cursor: "pointer",
+                fontFamily: "'DM Sans', sans-serif",
+              }}
+            >
+              Regenerate
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -780,7 +800,7 @@ function TaskCard({
   task: Task;
   result?: AgentResult;
   onMarkDone: (id: string) => void;
-  onRunAgent: (task: Task) => void;
+  onRunAgent: (task: Task, force?: boolean) => void;
   projectSummary: string;
   autoExpandSubtasks?: boolean;
   doneSubtaskIds: Set<string>;
@@ -919,6 +939,7 @@ function TaskCard({
           result={result}
           showApprove
           onApprove={() => onMarkDone(task.id)}
+          onRegenerate={() => onRunAgent(task, true)}
         />
       )}
       {result && task.assignee === "agent" && (
@@ -946,7 +967,7 @@ function DagView({
   assigneeFilter: Assignee | "all";
   results: Record<string, AgentResult>;
   onMarkDone: (id: string) => void;
-  onRunAgent: (task: Task) => void;
+  onRunAgent: (task: Task, force?: boolean) => void;
   projectSummary: string;
   doneSubtaskIds: Set<string>;
   onToggleSubtask: (id: string) => void;
@@ -1248,15 +1269,15 @@ export default function Home() {
         launchedAgentTasks.current.add(task.id);
         // Stagger launches slightly to avoid hammering the API
         setTimeout(() => {
-          execute(task.id, task.title, task.description, plan?.summary || brief);
+          execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee);
         }, launchedAgentTasks.current.size * 500);
       }
     }
   }, [currentTasksForAutoRun, step, plan, results, execute, brief]);
 
-  const handleRunAgent = (task: Task) => {
+  const handleRunAgent = (task: Task, force?: boolean) => {
     launchedAgentTasks.current.add(task.id);
-    execute(task.id, task.title, task.description, plan?.summary || brief);
+    execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee, force);
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
