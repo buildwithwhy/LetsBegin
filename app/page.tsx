@@ -686,9 +686,69 @@ export default function Home() {
             <h1 style={{ fontSize: 36, fontWeight: 700, marginBottom: 8, color: "#1a1a2e" }}>
               What are we building?
             </h1>
-            <p style={{ color: "#666", fontSize: 15, marginBottom: 24 }}>
-              Describe your project, task, or goal. Be as messy as you want — we&apos;ll sort it out.
+            <p style={{ color: "#666", fontSize: 16, marginBottom: 28, lineHeight: 1.6 }}>
+              Most AI tools do the work <em>for</em> you or leave you to figure it out alone.
+              LetsBegin does neither — it splits your project into a clear plan where you and
+              the AI each handle what you&apos;re best at, one task at a time.
             </p>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: 14,
+                marginBottom: 32,
+              }}
+            >
+              {[
+                {
+                  num: "1",
+                  title: "Describe it messy",
+                  desc: "Paste your goal in plain language. No structure needed.",
+                },
+                {
+                  num: "2",
+                  title: "Get a real plan",
+                  desc: "AI compiles a dependency-aware task graph — computed once, not regenerated.",
+                },
+                {
+                  num: "3",
+                  title: "Work through it together",
+                  desc: "Each task is tagged: AI handles it, you handle it, or AI drafts and you review.",
+                },
+              ].map((s) => (
+                <div
+                  key={s.num}
+                  style={{
+                    background: "#fff",
+                    borderRadius: 10,
+                    padding: "16px 14px",
+                    border: "1px solid #e8e6f0",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: "50%",
+                      background: `${PRIMARY}14`,
+                      color: PRIMARY,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginBottom: 8,
+                    }}
+                  >
+                    {s.num}
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{s.title}</div>
+                  <div style={{ fontSize: 12, color: "#888", lineHeight: 1.5 }}>{s.desc}</div>
+                </div>
+              ))}
+            </div>
+
             <textarea
               value={brief}
               onChange={(e) => setBrief(e.target.value)}
