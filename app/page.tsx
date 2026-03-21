@@ -687,7 +687,7 @@ export default function Home() {
               What are we building?
             </h1>
             <p style={{ color: "#666", fontSize: 16, marginBottom: 28, lineHeight: 1.6 }}>
-              Most AI tools do the work <em>for</em> you or leave you to figure it out alone.
+              Most AI tools do the work <em>for&nbsp;you</em> or leave you to figure it out alone.
               LetsBegin does neither — it splits your project into a clear plan where you and
               the AI each handle what you&apos;re best at, one task at a time.
             </p>
@@ -748,6 +748,46 @@ export default function Home() {
                 </div>
               ))}
             </div>
+
+            <details
+              style={{
+                marginBottom: 28,
+                background: "#fff",
+                borderRadius: 10,
+                border: "1px solid #e8e6f0",
+                padding: "0 16px",
+              }}
+            >
+              <summary
+                style={{
+                  padding: "12px 0",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: PRIMARY,
+                  cursor: "pointer",
+                  listStyle: "none",
+                }}
+              >
+                How is this different? &darr;
+              </summary>
+              <div style={{ paddingBottom: 16, fontSize: 13, color: "#555", lineHeight: 1.7 }}>
+                <p style={{ margin: "0 0 10px" }}>
+                  <strong>You never lose the big picture.</strong> A progress bar tracks
+                  where you are across the whole project — not just the current chat turn.
+                </p>
+                <p style={{ margin: "0 0 10px" }}>
+                  <strong>Dependencies keep you unblocked.</strong> Tasks are organized as a
+                  graph, not a list. When one task is done, the next ones that depend on it
+                  unlock automatically. Parallel tasks show up together so you can tackle
+                  them in any order.
+                </p>
+                <p style={{ margin: 0 }}>
+                  <strong>The plan is stable.</strong> Your task graph is compiled once from
+                  your brief — it doesn&apos;t shift every time the AI responds. You decide
+                  how much the agent handles, and you always review before anything moves forward.
+                </p>
+              </div>
+            </details>
 
             <textarea
               value={brief}
