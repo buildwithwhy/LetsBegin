@@ -75,8 +75,8 @@ export async function* streamThinking(
 ${images.length > 0 ? "The user has also attached images for additional context. Analyze them and incorporate what you see into your observations." : ""}
 
 Think out loud about this brief. Make 4-6 short observations about:
-- What the key dependencies are (what must happen before what)
-- Which tasks can run in parallel
+- What ACTUALLY blocks what — be strict. "A depends on B" means A literally cannot start without B's output. Don't assume everything is serial.
+- Where can the human and AI work at the same time? Maximize parallel work between human tasks and agent tasks.
 - Which tasks should be done by an AI agent vs a human vs hybrid (agent drafts, human reviews)
 - Any risks or gotchas
 
@@ -123,6 +123,18 @@ Rules:
 - assignee is "agent" (AI can fully automate), "user" (human must do it), or "hybrid" (agent drafts, human reviews)
 - energy is "high" (significant effort), "medium" (moderate effort), or "low" (quick task)
 - Do NOT include subtasks — keep this lean
+
+CRITICAL — DEPENDENCY THINKING:
+Think very carefully about what ACTUALLY blocks what. A dependency means "this task literally cannot start until that task finishes because it needs the OUTPUT of that task."
+
+Common mistakes to avoid:
+- Do NOT make agent tasks depend on user tasks unless the agent literally needs the result. For example, "draft app description" does NOT depend on "register developer account" — the agent can draft text while the user sets up their account.
+- Do NOT create a single serial chain. Most projects have tasks that can run in parallel. Ask yourself: "Can the human be doing something while the agent works on something else?"
+- DO use parallel_group when multiple tasks share the same dependencies and can run at the same time.
+- DO let agent tasks start as early as possible — they should only depend on tasks whose output they actually need.
+- DO think about what the human can do independently vs what requires waiting.
+
+The goal is MAXIMUM PARALLELISM between human and agent work. Humans and agents should be busy at the same time whenever possible, not waiting on each other.
 
 Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the dependency graph is valid — no circular dependencies, and every id referenced in depends_on must exist.`,
   });

@@ -796,22 +796,35 @@ function TaskCard({
           </span>
           <span
             style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: ENERGY_COLORS[task.energy],
-              display: "inline-block",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "2px 7px",
+              borderRadius: 5,
+              background: `${ENERGY_COLORS[task.energy]}14`,
+              color: ENERGY_COLORS[task.energy],
+              fontSize: 10,
+              fontWeight: 600,
+              textTransform: "capitalize",
             }}
-            title={`${task.energy} energy`}
-          />
+          >
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: ENERGY_COLORS[task.energy] }} />
+            {task.energy}
+          </span>
         </div>
         {isLocked && <span style={{ fontSize: 14 }}>&#x1F512;</span>}
         {isDone && <span style={{ fontSize: 14, color: "#2DA44E" }}>&checkmark;</span>}
       </div>
       <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{task.title}</div>
-      <div style={{ fontSize: 13, color: "#787774", lineHeight: 1.5, marginBottom: 10 }}>
+      <div style={{ fontSize: 13, color: "#787774", lineHeight: 1.5, marginBottom: 8 }}>
         {task.description}
       </div>
+
+      {task.depends_on.length > 0 && isLocked && (
+        <div style={{ fontSize: 11, color: TEXT_LIGHT, marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ opacity: 0.6 }}>&#x1F517;</span> Waiting on {task.depends_on.length} task{task.depends_on.length > 1 ? "s" : ""}
+        </div>
+      )}
 
       {task.subtasks && task.subtasks.length > 0 && isPending && (
         <SubtaskList
@@ -1925,7 +1938,7 @@ export default function Home() {
                   fontFamily: "'DM Sans', sans-serif",
                 }}
               >
-                One Thing
+                One Thing at a Time
               </button>
               <button
                 onClick={() => setRevealMode("project")}
@@ -2047,7 +2060,7 @@ export default function Home() {
                     {/* Up next preview */}
                     {(() => {
                       const pendingAfter = allCurrentTasks.filter(
-                        (t) => t.status === "pending" && t.id !== oneThingTask.id
+                        (t) => t.status === "pending" && t.id !== oneThingTask.id && (t.assignee === "user" || t.assignee === "hybrid")
                       );
                       if (pendingAfter.length === 0) return null;
                       return (
