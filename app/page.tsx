@@ -1173,6 +1173,18 @@ export default function Home() {
     }
   }, [results, allTasks, doneIds, markDone]);
 
+  // Auto-complete tasks when all subtasks are checked
+  useEffect(() => {
+    for (const task of allTasks) {
+      if (doneIds.has(task.id)) continue;
+      if (!task.subtasks || task.subtasks.length === 0) continue;
+      const allSubtasksDone = task.subtasks.every((st) => doneSubtaskIds.has(st.id));
+      if (allSubtasksDone) {
+        markDone(task.id);
+      }
+    }
+  }, [doneSubtaskIds, allTasks, doneIds, markDone]);
+
   // Auto-run agent tasks when they become unblocked
   const currentTasksForAutoRun = getAllTasks(currentNodes);
   useEffect(() => {
