@@ -821,12 +821,50 @@ function TaskCard({
   const isLocked = task.status === "locked";
   const isDone = task.status === "done";
   const isPending = task.status === "pending";
+  const [doneExpanded, setDoneExpanded] = useState(false);
 
   const assigneeConfig = {
     agent: { icon: "\u26A1", label: "Agent", bg: `${PRIMARY}18`, color: PRIMARY },
     user: { icon: "\uD83D\uDC64", label: "You", bg: BORDER, color: "#787774" },
     hybrid: { icon: "\uD83E\uDD1D", label: "Review", bg: "#C4841D14", color: "#C4841D" },
   }[task.assignee];
+
+  // Collapsed done task — just shows title + checkmark
+  if (isDone && !doneExpanded) {
+    return (
+      <div
+        onClick={() => setDoneExpanded(true)}
+        style={{
+          background: SURFACE,
+          borderRadius: 10,
+          padding: "10px 14px",
+          border: `1px solid ${BORDER}`,
+          opacity: 0.55,
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <span style={{ color: "#2DA44E", fontSize: 14 }}>{"\u2713"}</span>
+        <span style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
+          padding: "2px 6px",
+          borderRadius: 5,
+          background: assigneeConfig.bg,
+          color: assigneeConfig.color,
+          fontSize: 10,
+          fontWeight: 600,
+        }}>
+          {assigneeConfig.icon}
+        </span>
+        <span style={{ fontSize: 13, color: TEXT_LIGHT, textDecoration: "line-through" }}>{task.title}</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "#B0AFA8" }}>{"\u25B6"}</span>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -835,7 +873,7 @@ function TaskCard({
         borderRadius: 12,
         padding: 18,
         border: `1px solid ${BORDER}`,
-        opacity: isLocked ? 0.32 : isDone ? 0.45 : 1,
+        opacity: isLocked ? 0.32 : isDone ? 0.55 : 1,
         transition: "opacity 0.2s",
       }}
     >
@@ -875,7 +913,7 @@ function TaskCard({
           </span>
         </div>
         {isLocked && <span style={{ fontSize: 14 }}>&#x1F512;</span>}
-        {isDone && <span style={{ fontSize: 14, color: "#2DA44E" }}>&checkmark;</span>}
+        {isDone && <span onClick={() => setDoneExpanded(false)} style={{ fontSize: 14, color: "#2DA44E", cursor: "pointer" }}>{"\u2713 \u25BC"}</span>}
       </div>
       <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{task.title}</div>
       <div style={{ fontSize: 13, color: "#787774", lineHeight: 1.5, marginBottom: 8 }}>
@@ -918,7 +956,7 @@ function TaskCard({
             fontFamily: "'DM Sans', sans-serif",
           }}
         >
-          &#x26A1; Run agent &rarr;
+          &#x26A1; Start agent draft &rarr;
         </button>
       )}
       {isPending && !result && task.assignee === "user" && (
@@ -946,34 +984,127 @@ function TaskCard({
         <TaskChat task={task} projectSummary={projectSummary} priorResults={priorResults} />
       )}
 
-      {result && task.assignee === "hybrid" && (
-        <div>
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "8px 12px",
-            borderRadius: 8,
-            background: `${PRIMARY}08`,
-            border: `1px solid ${PRIMARY}18`,
-            marginBottom: 8,
-            marginTop: 8,
-            fontSize: 12,
-            color: PRIMARY,
-            fontWeight: 500,
-          }}>
-            {result.done
-              ? "\u2705 Agent completed their part — review below and approve or regenerate"
-              : "\u26A1 Agent is working on their part..."}
+      {/* ─── Hybrid two-phase handoff ─── */}
+      {result && task.assignee === "hybrid" && (() => {
+        const agentSubs = task.subtasks?.filter((st) => st.assignee === "agent") || [];
+        const userSubs = task.subtasks?.filter((st) => st.assignee === "user") || [];
+        const agentDone = result.done;
+
+        return (
+          <div style={{ marginTop: 8 }}>
+            {/* Phase 1: Agent's work */}
+            <div style={{
+              padding: "8px 12px",
+              borderRadius: "8px 8px 0 0",
+              background: agentDone ? "#2DA44E0c" : `${PRIMARY}08`,
+              border: `1px solid ${agentDone ? "#2DA44E25" : `${PRIMARY}18`}`,
+              borderBottom: "none",
+              fontSize: 12,
+              fontWeight: 600,
+              color: agentDone ? "#2DA44E" : PRIMARY,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}>
+              {agentDone ? "\u2713 Agent\u2019s work complete" : "\u26A1 Agent working..."}
+              {agentSubs.length > 0 && (
+                <span style={{ fontWeight: 400, color: TEXT_LIGHT }}>
+                  ({agentSubs.length} step{agentSubs.length !== 1 ? "s" : ""})
+                </span>
+              )}
+            </div>
+            <div style={{
+              border: `1px solid ${BORDER}`,
+              borderTop: "none",
+              borderRadius: "0 0 8px 8px",
+              marginBottom: 12,
+              overflow: "hidden",
+            }}>
+              <AgentPanel result={result} showApprove={false} />
+            </div>
+
+            {/* Phase 2: Your turn */}
+            {agentDone && (
+              <div>
+                <div style={{
+                  padding: "8px 12px",
+                  borderRadius: "8px 8px 0 0",
+                  background: "#C4841D0a",
+                  border: "1px solid #C4841D20",
+                  borderBottom: "none",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#C4841D",
+                }}>
+                  Your turn — review and act
+                  {userSubs.length > 0 && (
+                    <span style={{ fontWeight: 400, color: TEXT_LIGHT, marginLeft: 6 }}>
+                      ({userSubs.length} step{userSubs.length !== 1 ? "s" : ""})
+                    </span>
+                  )}
+                </div>
+                <div style={{
+                  border: "1px solid #C4841D20",
+                  borderTop: "none",
+                  borderRadius: "0 0 8px 8px",
+                  padding: 14,
+                  background: SURFACE,
+                }}>
+                  {userSubs.length > 0 ? (
+                    <div style={{ marginBottom: 12 }}>
+                      {userSubs.map((st) => (
+                        <SubtaskItem
+                          key={st.id}
+                          st={st}
+                          done={doneSubtaskIds.has(st.id)}
+                          onToggle={onToggleSubtask}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 13, color: "#787774", marginBottom: 12 }}>
+                      Review the agent&apos;s output above, then approve or regenerate.
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => onMarkDone(task.id)}
+                      style={{
+                        padding: "8px 18px",
+                        border: "none",
+                        borderRadius: 8,
+                        background: "#C4841D",
+                        color: "#fff",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      Approve &amp; continue &rarr;
+                    </button>
+                    <button
+                      onClick={() => onRunAgent(task, true)}
+                      style={{
+                        padding: "8px 14px",
+                        border: `1px solid ${BORDER}`,
+                        borderRadius: 8,
+                        background: "transparent",
+                        color: TEXT_LIGHT,
+                        fontSize: 13,
+                        cursor: "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      Regenerate
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-          <AgentPanel
-            result={result}
-            showApprove
-            onApprove={() => onMarkDone(task.id)}
-            onRegenerate={() => onRunAgent(task, true)}
-          />
-        </div>
-      )}
+        );
+      })()}
       {result && task.assignee === "agent" && (
         <AgentPanel result={result} />
       )}
@@ -1007,6 +1138,7 @@ function DagView({
   allTasks: Task[];
 }) {
   const [view, setView] = useState<"steps" | "graph">("steps");
+  const [completedExpanded, setCompletedExpanded] = useState(false);
 
   // Build prior results from completed tasks
   const buildPriorResults = (): PriorResult[] => {
@@ -1078,65 +1210,121 @@ function DagView({
         </button>
       </div>
 
-      {view === "steps" ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {filteredNodes.map((node) => {
-            if (node.type === "task") {
-              return (
-                <TaskCard
-                  key={node.id}
-                  task={node}
-                  result={results[node.id]}
-                  onMarkDone={onMarkDone}
-                  onRunAgent={onRunAgent}
-                  projectSummary={projectSummary}
-                  doneSubtaskIds={doneSubtaskIds}
-                  onToggleSubtask={onToggleSubtask}
-                  priorResults={priorResults}
-                />
-              );
-            }
+      {view === "steps" ? (() => {
+        const isNodeDone = (node: DagNode) =>
+          node.type === "task" ? node.status === "done" : node.children.every((c) => c.status === "done");
+        const activeNodes = filteredNodes.filter((n) => !isNodeDone(n));
+        const doneNodes = filteredNodes.filter((n) => isNodeDone(n));
+        // Count all done tasks (including children in parallel groups)
+        const doneTaskCount = doneNodes.reduce((acc, n) => acc + (n.type === "task" ? 1 : n.children.length), 0);
+
+        const renderNode = (node: DagNode) => {
+          if (node.type === "task") {
             return (
-              <div key={node.id}>
+              <TaskCard
+                key={node.id}
+                task={node}
+                result={results[node.id]}
+                onMarkDone={onMarkDone}
+                onRunAgent={onRunAgent}
+                projectSummary={projectSummary}
+                doneSubtaskIds={doneSubtaskIds}
+                onToggleSubtask={onToggleSubtask}
+                priorResults={priorResults}
+              />
+            );
+          }
+          return (
+            <div key={node.id}>
+              <div
+                style={{
+                  textAlign: "center",
+                  color: TEXT_LIGHT,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  letterSpacing: 1,
+                  textTransform: "uppercase",
+                  margin: "8px 0",
+                }}
+              >
+                &mdash; Can do simultaneously &mdash;
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+                  gap: 12,
+                }}
+              >
+                {node.children.map((child) => (
+                  <TaskCard
+                    key={child.id}
+                    task={child}
+                    result={results[child.id]}
+                    onMarkDone={onMarkDone}
+                    onRunAgent={onRunAgent}
+                    projectSummary={projectSummary}
+                    doneSubtaskIds={doneSubtaskIds}
+                    onToggleSubtask={onToggleSubtask}
+                    priorResults={priorResults}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        };
+
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {activeNodes.map(renderNode)}
+            {doneTaskCount > 0 && (
+              <>
                 <div
+                  onClick={() => setCompletedExpanded((v) => !v)}
                   style={{
-                    textAlign: "center",
-                    color: TEXT_LIGHT,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    cursor: "pointer",
+                    padding: "10px 0",
+                    userSelect: "none",
+                  }}
+                >
+                  <div style={{ flex: 1, height: 1, background: BORDER }} />
+                  <span style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
                     fontSize: 12,
                     fontWeight: 600,
-                    letterSpacing: 1,
+                    color: TEXT_LIGHT,
                     textTransform: "uppercase",
-                    margin: "8px 0",
-                  }}
-                >
-                  &mdash; Can do simultaneously &mdash;
+                    letterSpacing: 0.5,
+                    whiteSpace: "nowrap",
+                  }}>
+                    <span style={{
+                      fontSize: 10,
+                      transition: "transform 0.2s",
+                      transform: completedExpanded ? "rotate(0deg)" : "rotate(-90deg)",
+                      display: "inline-block",
+                    }}>
+                      {"\u25BC"}
+                    </span>
+                    <span style={{ color: "#2DA44E" }}>{"\u2713"}</span>
+                    Completed ({doneTaskCount})
+                  </span>
+                  <div style={{ flex: 1, height: 1, background: BORDER }} />
                 </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-                    gap: 12,
-                  }}
-                >
-                  {node.children.map((child) => (
-                    <TaskCard
-                      key={child.id}
-                      task={child}
-                      result={results[child.id]}
-                      onMarkDone={onMarkDone}
-                      onRunAgent={onRunAgent}
-                      projectSummary={projectSummary}
-                      doneSubtaskIds={doneSubtaskIds}
-                      onToggleSubtask={onToggleSubtask}
-                      priorResults={priorResults}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
+                {completedExpanded && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {doneNodes.map(renderNode)}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })() : (
         <AsciiGraph nodes={filteredNodes} />
       )}
     </div>
