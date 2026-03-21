@@ -687,9 +687,10 @@ export default function Home() {
               What are we building?
             </h1>
             <p style={{ color: "#666", fontSize: 16, marginBottom: 28, lineHeight: 1.6 }}>
-              Most AI tools do the work <em>for&nbsp;you</em> or leave you to figure it out alone.
-              LetsBegin does neither — it splits your project into a clear plan where you and
-              the AI each handle what you&apos;re best at, one task at a time.
+              Most AI tools do the work <em>for you</em>{" "}
+              or leave you to figure it out alone. LetsBegin does neither — it
+              splits your project into a clear plan where you and the AI each
+              handle what you&apos;re best at, one task at a time.
             </p>
 
             <div
