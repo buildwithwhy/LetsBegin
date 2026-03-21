@@ -1173,7 +1173,7 @@ export default function Home() {
               });
             } else if (event.type === "error") {
               console.error("Compile error:", event.text);
-              setCompileStatus("Something went wrong — try again");
+              setCompileStatus("error:" + (event.text || "Unknown error"));
               setCompileStartTime(null);
             }
           } catch {
@@ -1661,25 +1661,84 @@ export default function Home() {
         {/* ─── COMPILING ─── */}
         {step === "compiling" && (
           <div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div
-                  style={{
-                    width: 20,
-                    height: 20,
-                    border: `3px solid ${PRIMARY}`,
-                    borderTopColor: "transparent",
-                    borderRadius: "50%",
-                    animation: "spin 0.8s linear infinite",
-                  }}
-                />
-                <span style={{ fontSize: 16, fontWeight: 600 }}>{compileStatus}</span>
+            {compileStatus.startsWith("error:") ? (
+              <div>
+                <div style={{
+                  background: "#fff",
+                  borderRadius: 12,
+                  padding: 20,
+                  border: "1px solid #e8e6f0",
+                  marginBottom: 16,
+                }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: "#e85d24" }}>
+                    Plan generation failed
+                  </div>
+                  <div style={{ fontSize: 12, color: "#888", lineHeight: 1.5, fontFamily: "'DM Mono', monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 120, overflow: "auto" }}>
+                    {compileStatus.slice(6)}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button
+                    onClick={handleCompile}
+                    style={{
+                      padding: "10px 24px",
+                      border: "none",
+                      borderRadius: 10,
+                      background: PRIMARY,
+                      color: "#fff",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    Try again
+                  </button>
+                  <button
+                    onClick={() => setStep("input")}
+                    style={{
+                      padding: "10px 20px",
+                      border: "1px solid #e8e6f0",
+                      borderRadius: 10,
+                      background: "#fff",
+                      color: "#666",
+                      fontSize: 14,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    Edit brief
+                  </button>
+                </div>
+                {thinkingText && (
+                  <div style={{ marginTop: 16 }}>
+                    <ThinkingTerminal text={thinkingText} />
+                  </div>
+                )}
               </div>
-              <span style={{ fontSize: 13, color: "#999", fontVariantNumeric: "tabular-nums" }}>
-                {elapsed}s
-              </span>
-            </div>
-            <ThinkingTerminal text={thinkingText} />
+            ) : (
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div
+                      style={{
+                        width: 20,
+                        height: 20,
+                        border: `3px solid ${PRIMARY}`,
+                        borderTopColor: "transparent",
+                        borderRadius: "50%",
+                        animation: "spin 0.8s linear infinite",
+                      }}
+                    />
+                    <span style={{ fontSize: 16, fontWeight: 600 }}>{compileStatus}</span>
+                  </div>
+                  <span style={{ fontSize: 13, color: "#999", fontVariantNumeric: "tabular-nums" }}>
+                    {elapsed}s
+                  </span>
+                </div>
+                <ThinkingTerminal text={thinkingText} />
+              </div>
+            )}
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
           </div>
         )}
