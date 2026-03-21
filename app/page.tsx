@@ -14,6 +14,10 @@ import {
   findNextActive,
 } from "@/lib/dag";
 import { useAgentExecutor, type AgentResult, type AgentStep } from "@/hooks/useAgentExecutor";
+import { useAuth } from "@/hooks/useAuth";
+import { usePlanStorage } from "@/hooks/usePlanStorage";
+import { useTTS } from "@/hooks/useTTS";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 
 const PRIMARY = "#6366A0";
 const BG = "#F7F6F3";
@@ -35,12 +39,16 @@ function Header({
   total,
   running,
   runningCount,
+  userEmail,
+  onSignOut,
 }: {
   plan: Plan | null;
   doneCount: number;
   total: number;
   running: string | null;
   runningCount: number;
+  userEmail?: string;
+  onSignOut?: () => void;
 }) {
   return (
     <header
@@ -106,6 +114,27 @@ function Header({
             <span style={{ fontSize: 12, color: PRIMARY, fontWeight: 500 }}>
               {runningCount > 1 ? `${runningCount} agents running` : "agent running"}
             </span>
+          </div>
+        )}
+        {userEmail && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, color: TEXT_LIGHT }}>{userEmail}</span>
+            {onSignOut && (
+              <button
+                onClick={onSignOut}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: TEXT_LIGHT,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                Sign out
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -750,6 +779,8 @@ function TaskCard({
   autoExpandSubtasks = false,
   doneSubtaskIds,
   onToggleSubtask,
+  onSpeak,
+  isSpeaking,
 }: {
   task: Task;
   result?: AgentResult;
@@ -759,6 +790,8 @@ function TaskCard({
   autoExpandSubtasks?: boolean;
   doneSubtaskIds: Set<string>;
   onToggleSubtask: (id: string) => void;
+  onSpeak?: (text: string) => void;
+  isSpeaking?: boolean;
 }) {
   const isLocked = task.status === "locked";
   const isDone = task.status === "done";
@@ -823,6 +856,33 @@ function TaskCard({
       <div style={{ fontSize: 13, color: "#787774", lineHeight: 1.5, marginBottom: 8 }}>
         {task.description}
       </div>
+
+      {isPending && onSpeak && (task.assignee === "user" || task.assignee === "hybrid") && (
+        <button
+          onClick={() => {
+            const subtaskText = task.subtasks
+              ? task.subtasks.map((st, i) => `Step ${i + 1}: ${st.title}`).join(". ")
+              : "";
+            onSpeak(`${task.title}. ${task.description}. ${subtaskText}`);
+          }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "4px 10px",
+            borderRadius: 6,
+            border: `1px solid ${BORDER}`,
+            background: "transparent",
+            color: isSpeaking ? PRIMARY : TEXT_LIGHT,
+            fontSize: 11,
+            cursor: "pointer",
+            fontFamily: "'DM Sans', sans-serif",
+            marginBottom: 8,
+          }}
+        >
+          {isSpeaking ? "\uD83D\uDD0A Playing..." : "\uD83D\uDD0A Read aloud"}
+        </button>
+      )}
 
       {task.depends_on.length > 0 && isLocked && (
         <div style={{ fontSize: 11, color: TEXT_LIGHT, marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
@@ -914,6 +974,8 @@ function DagView({
   projectSummary,
   doneSubtaskIds,
   onToggleSubtask,
+  onSpeak,
+  isSpeaking,
 }: {
   nodes: DagNode[];
   energyFilter: Energy | "all";
@@ -924,6 +986,8 @@ function DagView({
   projectSummary: string;
   doneSubtaskIds: Set<string>;
   onToggleSubtask: (id: string) => void;
+  onSpeak?: (text: string) => void;
+  isSpeaking?: boolean;
 }) {
   const [view, setView] = useState<"steps" | "graph">("steps");
 
@@ -995,6 +1059,8 @@ function DagView({
                   projectSummary={projectSummary}
                   doneSubtaskIds={doneSubtaskIds}
                   onToggleSubtask={onToggleSubtask}
+                  onSpeak={onSpeak}
+                  isSpeaking={isSpeaking}
                 />
               );
             }
@@ -1030,6 +1096,8 @@ function DagView({
                       projectSummary={projectSummary}
                       doneSubtaskIds={doneSubtaskIds}
                       onToggleSubtask={onToggleSubtask}
+                      onSpeak={onSpeak}
+                      isSpeaking={isSpeaking}
                     />
                   ))}
                 </div>
@@ -1102,8 +1170,20 @@ type ClarifyQuestion = {
 type Step = "input" | "clarify" | "compiling" | "reveal";
 
 export default function Home() {
+  const { user, loading: authLoading, signInWithEmail, signUpWithEmail, signInWithGoogle, signOut, configured: authConfigured } = useAuth();
+  const { savePlan, loadPlans, updateProgress } = usePlanStorage(user?.id);
+  const { speak, stop: stopSpeaking, speaking } = useTTS();
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [savedPlanId, setSavedPlanId] = useState<string | null>(null);
+
   const [step, setStep] = useState<Step>("input");
   const [brief, setBrief] = useState("");
+  const voiceInput = useVoiceInput(useCallback((text: string) => {
+    setBrief((prev) => prev + (prev ? " " : "") + text);
+  }, []));
   const [attachments, setAttachments] = useState<{ name: string; dataUrl: string }[]>([]);
   const [questions, setQuestions] = useState<ClarifyQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -1184,6 +1264,17 @@ export default function Home() {
       }
     }
   }, [doneSubtaskIds, allTasks, doneIds, markDone]);
+
+  // Auto-save plan and progress to Supabase
+  useEffect(() => {
+    if (!plan || !user) return;
+    const timeout = setTimeout(() => {
+      savePlan(brief, plan, doneIds, doneSubtaskIds).then((result) => {
+        if (result?.id && !savedPlanId) setSavedPlanId(result.id);
+      });
+    }, 1000); // Debounce 1s
+    return () => clearTimeout(timeout);
+  }, [plan, doneIds, doneSubtaskIds, user, brief, savePlan, savedPlanId]);
 
   // Auto-run agent tasks when they become unblocked
   const currentTasksForAutoRun = getAllTasks(currentNodes);
@@ -1373,11 +1464,117 @@ export default function Home() {
 
   return (
     <div style={{ minHeight: "100vh" }}>
-      <Header plan={plan} doneCount={doneCount} total={total} running={running} runningCount={runningCount} />
+      <Header plan={plan} doneCount={doneCount} total={total} running={running} runningCount={runningCount} userEmail={user?.email} onSignOut={signOut} />
 
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "40px 20px" }}>
+        {/* ─── AUTH ─── */}
+        {authConfigured && !authLoading && !user && (
+          <div style={{ maxWidth: 380, margin: "60px auto", textAlign: "center" }}>
+            <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Welcome to LetsBegin</h2>
+            <p style={{ color: "#787774", fontSize: 14, marginBottom: 24 }}>Sign in to save your plans and progress.</p>
+
+            <button
+              onClick={async () => { const { error } = await signInWithGoogle(); if (error) setAuthError(error.message); }}
+              style={{
+                width: "100%",
+                padding: "10px 16px",
+                borderRadius: 10,
+                border: `1px solid ${BORDER}`,
+                background: SURFACE,
+                color: TEXT,
+                fontSize: 14,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "'DM Sans', sans-serif",
+                marginBottom: 16,
+              }}
+            >
+              Continue with Google
+            </button>
+
+            <div style={{ fontSize: 12, color: TEXT_LIGHT, marginBottom: 16 }}>or use email</div>
+
+            <input
+              type="email"
+              placeholder="Email"
+              value={authEmail}
+              onChange={(e) => setAuthEmail(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                fontSize: 14,
+                fontFamily: "'DM Sans', sans-serif",
+                borderRadius: 8,
+                border: `1px solid ${BORDER}`,
+                outline: "none",
+                boxSizing: "border-box",
+                marginBottom: 8,
+              }}
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                fontSize: 14,
+                fontFamily: "'DM Sans', sans-serif",
+                borderRadius: 8,
+                border: `1px solid ${BORDER}`,
+                outline: "none",
+                boxSizing: "border-box",
+                marginBottom: 12,
+              }}
+            />
+
+            {authError && (
+              <div style={{ fontSize: 12, color: "#CF522E", marginBottom: 12 }}>{authError}</div>
+            )}
+
+            <button
+              onClick={async () => {
+                setAuthError("");
+                const fn = authMode === "signin" ? signInWithEmail : signUpWithEmail;
+                const { error } = await fn(authEmail, authPassword);
+                if (error) setAuthError(error.message);
+              }}
+              style={{
+                width: "100%",
+                padding: "10px 16px",
+                borderRadius: 10,
+                border: "none",
+                background: PRIMARY,
+                color: "#fff",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "'DM Sans', sans-serif",
+                marginBottom: 12,
+              }}
+            >
+              {authMode === "signin" ? "Sign in" : "Create account"}
+            </button>
+
+            <button
+              onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
+              style={{
+                background: "none",
+                border: "none",
+                color: PRIMARY,
+                fontSize: 13,
+                cursor: "pointer",
+                fontFamily: "'DM Sans', sans-serif",
+              }}
+            >
+              {authMode === "signin" ? "Need an account? Sign up" : "Already have an account? Sign in"}
+            </button>
+          </div>
+        )}
+
         {/* ─── INPUT ─── */}
-        {step === "input" && (
+        {(user || !authConfigured || authLoading) && step === "input" && (
           <div>
             <h1 style={{ fontSize: 36, fontWeight: 700, marginBottom: 8, color: TEXT }}>
               What are we building?
@@ -1489,27 +1686,54 @@ export default function Home() {
               </div>
             </details>
 
-            <textarea
-              value={brief}
-              onChange={(e) => setBrief(e.target.value)}
-              placeholder="e.g. Submit my app to the App Store for the first time..."
-              style={{
-                width: "100%",
-                minHeight: 140,
-                padding: 16,
-                fontSize: 15,
-                fontFamily: "'DM Sans', sans-serif",
-                borderRadius: 12,
-                border: `2px solid ${BORDER}`,
-                background: SURFACE,
-                outline: "none",
-                resize: "vertical",
-                lineHeight: 1.6,
-                boxSizing: "border-box",
-              }}
-              onFocus={(e) => (e.target.style.borderColor = PRIMARY)}
-              onBlur={(e) => (e.target.style.borderColor = BORDER)}
-            />
+            <div style={{ position: "relative" }}>
+              <textarea
+                value={brief}
+                onChange={(e) => setBrief(e.target.value)}
+                placeholder="e.g. Launch a landing page for my new product by end of week..."
+                style={{
+                  width: "100%",
+                  minHeight: 140,
+                  padding: 16,
+                  paddingRight: 48,
+                  fontSize: 15,
+                  fontFamily: "'DM Sans', sans-serif",
+                  borderRadius: 12,
+                  border: `2px solid ${BORDER}`,
+                  background: SURFACE,
+                  outline: "none",
+                  resize: "vertical",
+                  lineHeight: 1.6,
+                  boxSizing: "border-box",
+                }}
+                onFocus={(e) => (e.target.style.borderColor = PRIMARY)}
+                onBlur={(e) => (e.target.style.borderColor = BORDER)}
+              />
+              {voiceInput.isSupported && (
+                <button
+                  onClick={voiceInput.listening ? voiceInput.stopListening : voiceInput.startListening}
+                  title={voiceInput.listening ? "Stop dictation" : "Dictate your brief"}
+                  style={{
+                    position: "absolute",
+                    right: 12,
+                    top: 12,
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    border: "none",
+                    background: voiceInput.listening ? "#CF522E" : `${PRIMARY}14`,
+                    color: voiceInput.listening ? "#fff" : PRIMARY,
+                    fontSize: 16,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {voiceInput.listening ? "\u25A0" : "\uD83C\uDF99"}
+                </button>
+              )}
+            </div>
 
             {/* Attachments */}
             <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -2076,6 +2300,8 @@ export default function Home() {
                       autoExpandSubtasks
                       doneSubtaskIds={doneSubtaskIds}
                       onToggleSubtask={toggleSubtask}
+                      onSpeak={speak}
+                      isSpeaking={speaking}
                     />
 
                     {/* What's happening in the background */}
@@ -2354,6 +2580,8 @@ export default function Home() {
                   projectSummary={plan?.summary || brief}
                   doneSubtaskIds={doneSubtaskIds}
                   onToggleSubtask={toggleSubtask}
+                  onSpeak={speak}
+                  isSpeaking={speaking}
                 />
               </div>
             )}
