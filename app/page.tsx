@@ -823,6 +823,8 @@ export default function Home() {
   const [questions, setQuestions] = useState<ClarifyQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [clarifyLoading, setClarifyLoading] = useState(false);
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [revealMode, setRevealMode] = useState<"onething" | "project">("onething");
   const [thinkingText, setThinkingText] = useState("");
   const [compileStatus, setCompileStatus] = useState("");
   const [compileStartTime, setCompileStartTime] = useState<number | null>(null);
@@ -1316,15 +1318,8 @@ export default function Home() {
         {/* ─── CLARIFY ─── */}
         {step === "clarify" && (
           <div>
-            <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>
-              A few quick questions
-            </h2>
-            <p style={{ color: "#666", fontSize: 14, marginBottom: 24 }}>
-              Help us tailor the plan to where you are. Skip any that don&apos;t apply.
-            </p>
-
             {clarifyLoading ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 40 }}>
                 <div
                   style={{
                     width: 18,
@@ -1338,130 +1333,203 @@ export default function Home() {
                 <span style={{ fontSize: 14, color: "#666" }}>Generating questions...</span>
                 <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
               </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {questions.map((q) => (
-                  <div
-                    key={q.id}
-                    style={{
-                      background: "#fff",
-                      borderRadius: 12,
-                      padding: 18,
-                      border: "1px solid #e8e6f0",
-                    }}
-                  >
-                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>
-                      {q.question}
-                    </div>
-                    {q.type === "yes_no" && (
-                      <div style={{ display: "flex", gap: 8 }}>
-                        {["Yes", "No"].map((opt) => (
-                          <button
-                            key={opt}
-                            onClick={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
-                            style={{
-                              padding: "6px 18px",
-                              borderRadius: 8,
-                              border: `2px solid ${answers[q.id] === opt ? PRIMARY : "#e8e6f0"}`,
-                              background: answers[q.id] === opt ? `${PRIMARY}0a` : "#fff",
-                              color: answers[q.id] === opt ? PRIMARY : "#666",
-                              fontSize: 13,
-                              fontWeight: 600,
-                              cursor: "pointer",
-                              fontFamily: "'DM Sans', sans-serif",
-                            }}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {q.type === "choice" && q.options && (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                        {q.options.map((opt) => (
-                          <button
-                            key={opt}
-                            onClick={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
-                            style={{
-                              padding: "6px 14px",
-                              borderRadius: 8,
-                              border: `2px solid ${answers[q.id] === opt ? PRIMARY : "#e8e6f0"}`,
-                              background: answers[q.id] === opt ? `${PRIMARY}0a` : "#fff",
-                              color: answers[q.id] === opt ? PRIMARY : "#666",
-                              fontSize: 13,
-                              fontWeight: 500,
-                              cursor: "pointer",
-                              fontFamily: "'DM Sans', sans-serif",
-                            }}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {q.type === "short" && (
-                      <input
-                        type="text"
-                        value={answers[q.id] || ""}
-                        onChange={(e) =>
-                          setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
-                        }
-                        placeholder="Type your answer..."
-                        style={{
-                          width: "100%",
-                          padding: "8px 12px",
-                          fontSize: 13,
-                          fontFamily: "'DM Sans', sans-serif",
-                          borderRadius: 8,
-                          border: "2px solid #e8e6f0",
-                          outline: "none",
-                          boxSizing: "border-box",
-                        }}
-                        onFocus={(e) => (e.target.style.borderColor = PRIMARY)}
-                        onBlur={(e) => (e.target.style.borderColor = "#e8e6f0")}
-                      />
-                    )}
-                  </div>
-                ))}
+            ) : questions.length > 0 ? (
+              <div>
+                {/* Progress dots */}
+                <div style={{ display: "flex", gap: 6, marginBottom: 24 }}>
+                  {questions.map((_, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        width: i === questionIndex ? 24 : 8,
+                        height: 8,
+                        borderRadius: 4,
+                        background: i < questionIndex ? PRIMARY : i === questionIndex ? PRIMARY : "#e8e6f0",
+                        opacity: i < questionIndex ? 0.4 : 1,
+                        transition: "all 0.3s ease",
+                      }}
+                    />
+                  ))}
+                </div>
 
-                <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
-                  <button
-                    onClick={handleCompile}
-                    style={{
-                      padding: "12px 32px",
-                      border: "none",
-                      borderRadius: 10,
-                      background: PRIMARY,
-                      color: "#fff",
-                      fontSize: 15,
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      fontFamily: "'DM Sans', sans-serif",
-                    }}
-                  >
-                    Build my plan &rarr;
-                  </button>
+                {/* Current question */}
+                {(() => {
+                  const q = questions[questionIndex];
+                  if (!q) return null;
+                  return (
+                    <div>
+                      <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 20, lineHeight: 1.4 }}>
+                        {q.question}
+                      </h2>
+
+                      {q.type === "yes_no" && (
+                        <div style={{ display: "flex", gap: 10 }}>
+                          {["Yes", "No"].map((opt) => (
+                            <button
+                              key={opt}
+                              onClick={() => {
+                                setAnswers((prev) => ({ ...prev, [q.id]: opt }));
+                                if (questionIndex < questions.length - 1) {
+                                  setTimeout(() => setQuestionIndex((i) => i + 1), 200);
+                                }
+                              }}
+                              style={{
+                                padding: "12px 32px",
+                                borderRadius: 10,
+                                border: `2px solid ${answers[q.id] === opt ? PRIMARY : "#e8e6f0"}`,
+                                background: answers[q.id] === opt ? `${PRIMARY}0a` : "#fff",
+                                color: answers[q.id] === opt ? PRIMARY : "#555",
+                                fontSize: 15,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                fontFamily: "'DM Sans', sans-serif",
+                                transition: "all 0.15s ease",
+                              }}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {q.type === "choice" && q.options && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {q.options.map((opt) => (
+                            <button
+                              key={opt}
+                              onClick={() => {
+                                setAnswers((prev) => ({ ...prev, [q.id]: opt }));
+                                if (questionIndex < questions.length - 1) {
+                                  setTimeout(() => setQuestionIndex((i) => i + 1), 200);
+                                }
+                              }}
+                              style={{
+                                padding: "12px 16px",
+                                borderRadius: 10,
+                                border: `2px solid ${answers[q.id] === opt ? PRIMARY : "#e8e6f0"}`,
+                                background: answers[q.id] === opt ? `${PRIMARY}0a` : "#fff",
+                                color: answers[q.id] === opt ? PRIMARY : "#555",
+                                fontSize: 14,
+                                fontWeight: 500,
+                                cursor: "pointer",
+                                fontFamily: "'DM Sans', sans-serif",
+                                textAlign: "left",
+                                transition: "all 0.15s ease",
+                              }}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {q.type === "short" && (
+                        <input
+                          type="text"
+                          value={answers[q.id] || ""}
+                          onChange={(e) =>
+                            setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && questionIndex < questions.length - 1) {
+                              setQuestionIndex((i) => i + 1);
+                            }
+                          }}
+                          placeholder="Type your answer..."
+                          autoFocus
+                          style={{
+                            width: "100%",
+                            padding: "12px 14px",
+                            fontSize: 15,
+                            fontFamily: "'DM Sans', sans-serif",
+                            borderRadius: 10,
+                            border: "2px solid #e8e6f0",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                          onFocus={(e) => (e.target.style.borderColor = PRIMARY)}
+                          onBlur={(e) => (e.target.style.borderColor = "#e8e6f0")}
+                        />
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Navigation */}
+                <div style={{ display: "flex", gap: 12, marginTop: 28, alignItems: "center" }}>
+                  {questionIndex > 0 && (
+                    <button
+                      onClick={() => setQuestionIndex((i) => i - 1)}
+                      style={{
+                        padding: "10px 20px",
+                        border: "1px solid #e8e6f0",
+                        borderRadius: 10,
+                        background: "#fff",
+                        color: "#666",
+                        fontSize: 14,
+                        cursor: "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      &larr; Back
+                    </button>
+                  )}
+                  {questionIndex < questions.length - 1 ? (
+                    <button
+                      onClick={() => setQuestionIndex((i) => i + 1)}
+                      style={{
+                        padding: "10px 24px",
+                        border: "none",
+                        borderRadius: 10,
+                        background: PRIMARY,
+                        color: "#fff",
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      Next &rarr;
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleCompile}
+                      style={{
+                        padding: "10px 28px",
+                        border: "none",
+                        borderRadius: 10,
+                        background: PRIMARY,
+                        color: "#fff",
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      Build my plan &rarr;
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       setAnswers({});
                       handleCompile();
                     }}
                     style={{
-                      padding: "12px 20px",
+                      padding: "10px 16px",
                       border: "none",
                       borderRadius: 10,
                       background: "transparent",
-                      color: "#888",
-                      fontSize: 14,
+                      color: "#aaa",
+                      fontSize: 13,
                       cursor: "pointer",
                       fontFamily: "'DM Sans', sans-serif",
                     }}
                   >
-                    Skip questions
+                    Skip all
                   </button>
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
         )}
 
@@ -1492,75 +1560,278 @@ export default function Home() {
         )}
 
         {/* ─── REVEAL ─── */}
-        {step === "reveal" && plan && (
+        {step === "reveal" && plan && (() => {
+          // Find the "one thing" — first pending task for the user to act on
+          const allCurrentTasks = getAllTasks(currentNodes);
+          const oneThingTask = allCurrentTasks.find(
+            (t) => t.status === "pending" && (t.assignee === "user" || t.assignee === "hybrid")
+          ) || allCurrentTasks.find(
+            (t) => t.status === "pending"
+          );
+          const allDone = allCurrentTasks.every((t) => doneIds.has(t.id));
+
+          return (
           <div>
-            {/* Summary card */}
-            <div
-              style={{
-                background: "#fff",
-                borderRadius: 14,
-                padding: 22,
-                border: "1px solid #e8e6f0",
-                marginBottom: 24,
-              }}
-            >
-              <h2 style={{ fontSize: 20, fontWeight: 700, marginTop: 0, marginBottom: 8 }}>
-                {plan.project_title}
-              </h2>
-              <p style={{ fontSize: 14, color: "#555", lineHeight: 1.6, marginBottom: 14 }}>
-                {plan.summary}
-              </p>
-              <div style={{ display: "flex", gap: 16, fontSize: 13, color: "#888" }}>
-                <span>
-                  <strong style={{ color: PRIMARY }}>{agentCount}</strong> agent
-                </span>
-                <span>
-                  <strong style={{ color: "#d4a017" }}>{hybridCount}</strong> hybrid
-                </span>
-                <span>
-                  <strong style={{ color: "#666" }}>{userCount}</strong> you
-                </span>
-                <span>
-                  <strong style={{ color: "#1a1a2e" }}>{total}</strong> total
-                </span>
-              </div>
+            {/* Mode toggle */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+              <button
+                onClick={() => setRevealMode("onething")}
+                style={{
+                  padding: "8px 18px",
+                  borderRadius: 10,
+                  border: revealMode === "onething" ? `2px solid ${PRIMARY}` : "2px solid #e8e6f0",
+                  background: revealMode === "onething" ? `${PRIMARY}0a` : "#fff",
+                  color: revealMode === "onething" ? PRIMARY : "#666",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                One Thing
+              </button>
+              <button
+                onClick={() => setRevealMode("project")}
+                style={{
+                  padding: "8px 18px",
+                  borderRadius: 10,
+                  border: revealMode === "project" ? `2px solid ${PRIMARY}` : "2px solid #e8e6f0",
+                  background: revealMode === "project" ? `${PRIMARY}0a` : "#fff",
+                  color: revealMode === "project" ? PRIMARY : "#666",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                Full Project
+              </button>
+              <div style={{ flex: 1 }} />
+              <span style={{ fontSize: 13, color: "#999", alignSelf: "center" }}>
+                {doneCount}/{total} done
+              </span>
             </div>
 
-            {/* Energy filter */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-              {(["all", "high", "medium", "low"] as const).map((e) => (
-                <button
-                  key={e}
-                  onClick={() => setEnergyFilter(e)}
+            {/* ─── ONE THING MODE ─── */}
+            {revealMode === "onething" && (
+              <div>
+                {/* Compact progress bar */}
+                <div
                   style={{
-                    padding: "5px 12px",
-                    borderRadius: 6,
-                    border: "none",
-                    background: energyFilter === e ? (e === "all" ? PRIMARY : ENERGY_COLORS[e]) : "#e8e6f0",
-                    color: energyFilter === e ? "#fff" : "#666",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    textTransform: "capitalize",
-                    fontFamily: "'DM Sans', sans-serif",
+                    width: "100%",
+                    height: 4,
+                    background: "#e8e6f0",
+                    borderRadius: 2,
+                    overflow: "hidden",
+                    marginBottom: 28,
                   }}
                 >
-                  {e}
-                </button>
-              ))}
-            </div>
+                  <div
+                    style={{
+                      width: `${total > 0 ? (doneCount / total) * 100 : 0}%`,
+                      height: "100%",
+                      background: PRIMARY,
+                      borderRadius: 2,
+                      transition: "width 0.4s ease",
+                    }}
+                  />
+                </div>
 
-            {/* DAG view */}
-            <DagView
-              nodes={currentNodes}
-              energyFilter={energyFilter}
-              results={results}
-              onMarkDone={markDone}
-              onRunAgent={handleRunAgent}
-              projectSummary={plan?.summary || brief}
-            />
+                {allDone ? (
+                  <div style={{ textAlign: "center", padding: "40px 0" }}>
+                    <div style={{ fontSize: 48, marginBottom: 12 }}>&#x1F389;</div>
+                    <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>All done!</h2>
+                    <p style={{ color: "#666", fontSize: 15 }}>
+                      Every task in your plan is complete.
+                    </p>
+                    <button
+                      onClick={() => setRevealMode("project")}
+                      style={{
+                        marginTop: 16,
+                        padding: "10px 24px",
+                        border: `1px solid ${PRIMARY}`,
+                        borderRadius: 10,
+                        background: "transparent",
+                        color: PRIMARY,
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      View full project
+                    </button>
+                  </div>
+                ) : oneThingTask ? (
+                  <div>
+                    <div style={{ fontSize: 13, color: "#999", marginBottom: 8 }}>
+                      Your next task:
+                    </div>
+                    <TaskCard
+                      task={oneThingTask}
+                      result={results[oneThingTask.id]}
+                      onMarkDone={markDone}
+                      onRunAgent={handleRunAgent}
+                      projectSummary={plan?.summary || brief}
+                    />
+
+                    {/* What's happening in the background */}
+                    {running && running !== oneThingTask.id && (
+                      <div
+                        style={{
+                          marginTop: 16,
+                          padding: "12px 16px",
+                          borderRadius: 10,
+                          background: `${PRIMARY}08`,
+                          border: `1px solid ${PRIMARY}20`,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: "50%",
+                            background: PRIMARY,
+                            animation: "pulse 1.5s ease-in-out infinite",
+                          }}
+                        />
+                        <span style={{ fontSize: 12, color: "#666" }}>
+                          Agent is working on another task in the background...
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Up next preview */}
+                    {(() => {
+                      const pendingAfter = allCurrentTasks.filter(
+                        (t) => t.status === "pending" && t.id !== oneThingTask.id
+                      );
+                      if (pendingAfter.length === 0) return null;
+                      return (
+                        <div style={{ marginTop: 24 }}>
+                          <div style={{ fontSize: 12, color: "#bbb", fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                            Up next
+                          </div>
+                          {pendingAfter.slice(0, 2).map((t) => (
+                            <div
+                              key={t.id}
+                              style={{
+                                padding: "8px 12px",
+                                borderRadius: 8,
+                                background: "#fff",
+                                border: "1px solid #e8e6f0",
+                                marginBottom: 6,
+                                fontSize: 13,
+                                color: "#999",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                              }}
+                            >
+                              <span style={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: "50%",
+                                background: ENERGY_COLORS[t.energy],
+                              }} />
+                              {t.title}
+                            </div>
+                          ))}
+                          {pendingAfter.length > 2 && (
+                            <div style={{ fontSize: 12, color: "#ccc", paddingLeft: 12 }}>
+                              +{pendingAfter.length - 2} more
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <div style={{ textAlign: "center", padding: "30px 0", color: "#888" }}>
+                    <p style={{ fontSize: 14 }}>
+                      No tasks need your attention right now. The agent is working.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ─── FULL PROJECT MODE ─── */}
+            {revealMode === "project" && (
+              <div>
+                {/* Summary card */}
+                <div
+                  style={{
+                    background: "#fff",
+                    borderRadius: 14,
+                    padding: 22,
+                    border: "1px solid #e8e6f0",
+                    marginBottom: 24,
+                  }}
+                >
+                  <h2 style={{ fontSize: 20, fontWeight: 700, marginTop: 0, marginBottom: 8 }}>
+                    {plan.project_title}
+                  </h2>
+                  <p style={{ fontSize: 14, color: "#555", lineHeight: 1.6, marginBottom: 14 }}>
+                    {plan.summary}
+                  </p>
+                  <div style={{ display: "flex", gap: 16, fontSize: 13, color: "#888" }}>
+                    <span>
+                      <strong style={{ color: PRIMARY }}>{agentCount}</strong> agent
+                    </span>
+                    <span>
+                      <strong style={{ color: "#d4a017" }}>{hybridCount}</strong> hybrid
+                    </span>
+                    <span>
+                      <strong style={{ color: "#666" }}>{userCount}</strong> you
+                    </span>
+                    <span>
+                      <strong style={{ color: "#1a1a2e" }}>{total}</strong> total
+                    </span>
+                  </div>
+                </div>
+
+                {/* Energy filter */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+                  {(["all", "high", "medium", "low"] as const).map((e) => (
+                    <button
+                      key={e}
+                      onClick={() => setEnergyFilter(e)}
+                      style={{
+                        padding: "5px 12px",
+                        borderRadius: 6,
+                        border: "none",
+                        background: energyFilter === e ? (e === "all" ? PRIMARY : ENERGY_COLORS[e]) : "#e8e6f0",
+                        color: energyFilter === e ? "#fff" : "#666",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        textTransform: "capitalize",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      {e}
+                    </button>
+                  ))}
+                </div>
+
+                {/* DAG view */}
+                <DagView
+                  nodes={currentNodes}
+                  energyFilter={energyFilter}
+                  results={results}
+                  onMarkDone={markDone}
+                  onRunAgent={handleRunAgent}
+                  projectSummary={plan?.summary || brief}
+                />
+              </div>
+            )}
           </div>
-        )}
+          );
+        })()}
       </main>
     </div>
   );
