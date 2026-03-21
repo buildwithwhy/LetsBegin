@@ -428,12 +428,20 @@ function inlineMarkdown(text: string, color?: string): React.ReactNode[] {
 
 // ─── TaskChat ───
 
+interface PriorResult {
+  title: string;
+  assignee: string;
+  output: string;
+}
+
 function TaskChat({
   task,
   projectSummary,
+  priorResults,
 }: {
   task: Task;
   projectSummary: string;
+  priorResults: PriorResult[];
 }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
@@ -465,6 +473,8 @@ function TaskChat({
           taskDescription: task.description,
           projectSummary,
           messages: newMessages,
+          priorResults,
+          subtasks: task.subtasks?.map((st) => ({ title: st.title, assignee: st.assignee })),
         }),
       });
 
@@ -796,6 +806,7 @@ function TaskCard({
   autoExpandSubtasks = false,
   doneSubtaskIds,
   onToggleSubtask,
+  priorResults,
 }: {
   task: Task;
   result?: AgentResult;
@@ -805,6 +816,7 @@ function TaskCard({
   autoExpandSubtasks?: boolean;
   doneSubtaskIds: Set<string>;
   onToggleSubtask: (id: string) => void;
+  priorResults: PriorResult[];
 }) {
   const isLocked = task.status === "locked";
   const isDone = task.status === "done";
@@ -931,7 +943,7 @@ function TaskCard({
       )}
 
       {isPending && (task.assignee === "user" || task.assignee === "hybrid") && (
-        <TaskChat task={task} projectSummary={projectSummary} />
+        <TaskChat task={task} projectSummary={projectSummary} priorResults={priorResults} />
       )}
 
       {result && task.assignee === "hybrid" && (
@@ -961,6 +973,7 @@ function DagView({
   projectSummary,
   doneSubtaskIds,
   onToggleSubtask,
+  allTasks,
 }: {
   nodes: DagNode[];
   energyFilter: Energy | "all";
@@ -971,8 +984,25 @@ function DagView({
   projectSummary: string;
   doneSubtaskIds: Set<string>;
   onToggleSubtask: (id: string) => void;
+  allTasks: Task[];
 }) {
   const [view, setView] = useState<"steps" | "graph">("steps");
+
+  // Build prior results from completed tasks
+  const buildPriorResults = (): PriorResult[] => {
+    return allTasks
+      .filter((t) => results[t.id]?.done)
+      .map((t) => ({
+        title: t.title,
+        assignee: t.assignee,
+        output: results[t.id]?.finalOutput || results[t.id]?.steps
+          ?.filter((s) => s.type === "output")
+          .map((s) => s.type === "output" ? s.content : "")
+          .join("\n") || "",
+      }));
+  };
+
+  const priorResults = buildPriorResults();
 
   const matchesFilters = (t: Task) => {
     if (energyFilter !== "all" && t.energy !== energyFilter) return false;
@@ -1042,6 +1072,7 @@ function DagView({
                   projectSummary={projectSummary}
                   doneSubtaskIds={doneSubtaskIds}
                   onToggleSubtask={onToggleSubtask}
+                  priorResults={priorResults}
                 />
               );
             }
@@ -1077,6 +1108,7 @@ function DagView({
                       projectSummary={projectSummary}
                       doneSubtaskIds={doneSubtaskIds}
                       onToggleSubtask={onToggleSubtask}
+                      priorResults={priorResults}
                     />
                   ))}
                 </div>
@@ -2257,6 +2289,16 @@ export default function Home() {
                       autoExpandSubtasks
                       doneSubtaskIds={doneSubtaskIds}
                       onToggleSubtask={toggleSubtask}
+                      priorResults={allTasks
+                        .filter((t) => results[t.id]?.done)
+                        .map((t) => ({
+                          title: t.title,
+                          assignee: t.assignee,
+                          output: results[t.id]?.finalOutput || results[t.id]?.steps
+                            ?.filter((s) => s.type === "output")
+                            .map((s) => s.type === "output" ? s.content : "")
+                            .join("\n") || "",
+                        }))}
                     />
 
                     {/* What's happening in the background */}
@@ -2535,6 +2577,7 @@ export default function Home() {
                   projectSummary={plan?.summary || brief}
                   doneSubtaskIds={doneSubtaskIds}
                   onToggleSubtask={toggleSubtask}
+                  allTasks={allTasks}
                 />
               </div>
             )}

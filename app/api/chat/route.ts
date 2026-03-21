@@ -4,28 +4,46 @@ import { google } from "@ai-sdk/google";
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
-  const { taskTitle, taskDescription, projectSummary, messages } = await req.json();
+  const { taskTitle, taskDescription, projectSummary, messages, priorResults, subtasks } = await req.json();
+
+  // Build context from what agents have already done
+  let priorContext = "";
+  if (priorResults && priorResults.length > 0) {
+    priorContext = "\n\nHere is what has already been completed in this project:\n";
+    for (const r of priorResults) {
+      priorContext += `\n--- Completed: "${r.title}" (done by: ${r.assignee}) ---\n`;
+      if (r.output) {
+        priorContext += r.output.slice(0, 1500) + "\n";
+      }
+    }
+  }
+
+  let subtaskContext = "";
+  if (subtasks && subtasks.length > 0) {
+    subtaskContext = "\n\nThis task has these subtasks:\n";
+    for (const st of subtasks) {
+      subtaskContext += `- [${st.assignee}] ${st.title}\n`;
+    }
+  }
 
   const result = streamText({
     model: google("gemini-3-flash-preview"),
     system: `You are a helpful assistant guiding a user through a specific task in their project.
 
 Project context: ${projectSummary}
-
+${priorContext}
 Current task: "${taskTitle}"
 Task description: ${taskDescription}
+${subtaskContext}
 
-Your job is to help the user complete THIS specific task. You can:
-- Break the task into small, concrete steps if they ask
-- Explain terminology or concepts they're unsure about
-- Answer questions about how to do something
-- Provide encouragement and keep things manageable
+Your job is to help the user complete THIS specific task. You have full context of what happened before — reference specific outputs, tools, files, or decisions from prior steps when relevant.
 
 Guidelines:
 - Keep responses concise and actionable
 - Use numbered steps when walking through a process
+- Reference specific details from prior task results (e.g., "The agent used X tool to create Y — you can find it at Z")
+- If a prior step produced something the user needs, tell them exactly where it is and what to do with it
 - If the user seems overwhelmed, break things into even smaller pieces
-- Don't go off-topic — stay focused on this one task
 - Be warm and supportive, especially when tasks feel intimidating`,
     messages: messages.map((m: { role: string; content: string }) => ({
       role: m.role as "user" | "assistant",
