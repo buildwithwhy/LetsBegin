@@ -671,12 +671,15 @@ export default function Home() {
               setThinkingText((prev) => prev + event.text);
             } else if (event.type === "status") {
               setCompileStatus(event.text);
+            } else if (event.type === "progress") {
+              setCompileStatus(`Structuring your plan... ${event.taskCount} tasks found`);
             } else if (event.type === "plan") {
               setCompileStartTime(null);
               setPlan(event.plan);
               setStep("reveal");
             } else if (event.type === "error") {
               console.error("Compile error:", event.text);
+              setCompileStatus("Something went wrong — try again");
               setCompileStartTime(null);
             }
           } catch {

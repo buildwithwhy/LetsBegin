@@ -1,7 +1,7 @@
-import { streamText, generateObject } from "ai";
+import { streamText, streamObject } from "ai";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
-import { type Plan, computeUnlocked } from "./dag";
+import { type Plan, type DagNode, computeUnlocked } from "./dag";
 
 const taskSchema = z.object({
   id: z.string(),
@@ -25,7 +25,7 @@ const parallelGroupSchema = z.object({
 const planSchema = z.object({
   project_title: z.string(),
   summary: z.string(),
-  nodes: z.array(z.discriminatedUnion("type", [taskSchema, parallelGroupSchema])),
+  nodes: z.array(z.union([taskSchema, parallelGroupSchema])),
 });
 
 function authorityPrompt(authority: "minimal" | "moderate" | "high"): string {
@@ -39,10 +39,17 @@ function authorityPrompt(authority: "minimal" | "moderate" | "high"): string {
   }
 }
 
+export type CompilerEvent =
+  | { type: "thought"; text: string }
+  | { type: "status"; text: string }
+  | { type: "progress"; taskCount: number }
+  | { type: "plan"; plan: Plan }
+  | { type: "error"; text: string };
+
 export async function* streamThinking(
   brief: string,
   authority: "minimal" | "moderate" | "high"
-): AsyncGenerator<{ type: "thought"; text: string } | { type: "status"; text: string } | { type: "plan"; plan: Plan }> {
+): AsyncGenerator<CompilerEvent> {
   const authNote = authorityPrompt(authority);
 
   // Phase 1: Think out loud
@@ -70,8 +77,8 @@ Keep each observation to 1-2 sentences. Be practical and specific.`,
   // Signal transition to Phase 2
   yield { type: "status", text: "Structuring your plan..." };
 
-  // Phase 2: Generate structured plan
-  const planResult = await generateObject({
+  // Phase 2: Stream structured plan (so we get partial progress)
+  const planStream = streamObject({
     model: google("gemini-3-flash-preview"),
     schema: planSchema,
     prompt: `You are a project planning assistant. A user has given you this project brief:
@@ -82,6 +89,7 @@ Generate a structured project plan as a DAG (directed acyclic graph) of tasks.
 
 Rules:
 - Each task needs a unique id (use short slugs like "setup-account", "draft-description")
+- The "type" field must be exactly "task" for individual tasks or "parallel_group" for groups of parallel tasks
 - depends_on lists the ids of tasks that must complete before this task can start
 - The first task(s) should have an empty depends_on array
 - Use parallel_group to group tasks that can run simultaneously (they share the same dependencies)
@@ -95,8 +103,18 @@ ${authNote}
 Generate a realistic, practical plan with 6-12 tasks total. Make sure the dependency graph is valid — no circular dependencies, and every id referenced in depends_on must exist.`,
   });
 
-  const plan = planResult.object as Plan;
-  plan.nodes = computeUnlocked(plan.nodes, new Set());
+  let lastNodeCount = 0;
+
+  for await (const partial of planStream.partialObjectStream) {
+    if (partial.nodes && partial.nodes.length > lastNodeCount) {
+      lastNodeCount = partial.nodes.length;
+      yield { type: "progress", taskCount: lastNodeCount };
+    }
+  }
+
+  const finalResult = await planStream.object;
+  const plan = finalResult as Plan;
+  plan.nodes = computeUnlocked(plan.nodes as DagNode[], new Set());
 
   yield { type: "plan", plan };
 }
