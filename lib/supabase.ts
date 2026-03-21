@@ -1,14 +1,14 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "";
 
 // Create a dummy client if env vars aren't set (build time / no Supabase)
-export const supabase: SupabaseClient = supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey)
+export const supabase: SupabaseClient = supabaseUrl && supabaseKey
+  ? createClient(supabaseUrl, supabaseKey)
   : createClient("https://placeholder.supabase.co", "placeholder-key");
 
-export const supabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+export const supabaseConfigured = Boolean(supabaseUrl && supabaseKey);
 
 // SQL to run in Supabase dashboard (SQL Editor):
 //

@@ -16,7 +16,6 @@ import {
 import { useAgentExecutor, type AgentResult, type AgentStep } from "@/hooks/useAgentExecutor";
 import { useAuth } from "@/hooks/useAuth";
 import { usePlanStorage } from "@/hooks/usePlanStorage";
-import { useTTS } from "@/hooks/useTTS";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 
 const PRIMARY = "#6366A0";
@@ -779,8 +778,6 @@ function TaskCard({
   autoExpandSubtasks = false,
   doneSubtaskIds,
   onToggleSubtask,
-  onSpeak,
-  isSpeaking,
 }: {
   task: Task;
   result?: AgentResult;
@@ -790,8 +787,6 @@ function TaskCard({
   autoExpandSubtasks?: boolean;
   doneSubtaskIds: Set<string>;
   onToggleSubtask: (id: string) => void;
-  onSpeak?: (text: string) => void;
-  isSpeaking?: boolean;
 }) {
   const isLocked = task.status === "locked";
   const isDone = task.status === "done";
@@ -856,33 +851,6 @@ function TaskCard({
       <div style={{ fontSize: 13, color: "#787774", lineHeight: 1.5, marginBottom: 8 }}>
         {task.description}
       </div>
-
-      {isPending && onSpeak && (task.assignee === "user" || task.assignee === "hybrid") && (
-        <button
-          onClick={() => {
-            const subtaskText = task.subtasks
-              ? task.subtasks.map((st, i) => `Step ${i + 1}: ${st.title}`).join(". ")
-              : "";
-            onSpeak(`${task.title}. ${task.description}. ${subtaskText}`);
-          }}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 4,
-            padding: "4px 10px",
-            borderRadius: 6,
-            border: `1px solid ${BORDER}`,
-            background: "transparent",
-            color: isSpeaking ? PRIMARY : TEXT_LIGHT,
-            fontSize: 11,
-            cursor: "pointer",
-            fontFamily: "'DM Sans', sans-serif",
-            marginBottom: 8,
-          }}
-        >
-          {isSpeaking ? "\uD83D\uDD0A Playing..." : "\uD83D\uDD0A Read aloud"}
-        </button>
-      )}
 
       {task.depends_on.length > 0 && isLocked && (
         <div style={{ fontSize: 11, color: TEXT_LIGHT, marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
@@ -974,8 +942,6 @@ function DagView({
   projectSummary,
   doneSubtaskIds,
   onToggleSubtask,
-  onSpeak,
-  isSpeaking,
 }: {
   nodes: DagNode[];
   energyFilter: Energy | "all";
@@ -986,8 +952,6 @@ function DagView({
   projectSummary: string;
   doneSubtaskIds: Set<string>;
   onToggleSubtask: (id: string) => void;
-  onSpeak?: (text: string) => void;
-  isSpeaking?: boolean;
 }) {
   const [view, setView] = useState<"steps" | "graph">("steps");
 
@@ -1059,8 +1023,6 @@ function DagView({
                   projectSummary={projectSummary}
                   doneSubtaskIds={doneSubtaskIds}
                   onToggleSubtask={onToggleSubtask}
-                  onSpeak={onSpeak}
-                  isSpeaking={isSpeaking}
                 />
               );
             }
@@ -1096,8 +1058,6 @@ function DagView({
                       projectSummary={projectSummary}
                       doneSubtaskIds={doneSubtaskIds}
                       onToggleSubtask={onToggleSubtask}
-                      onSpeak={onSpeak}
-                      isSpeaking={isSpeaking}
                     />
                   ))}
                 </div>
@@ -1172,7 +1132,6 @@ type Step = "input" | "clarify" | "compiling" | "reveal";
 export default function Home() {
   const { user, loading: authLoading, signInWithEmail, signUpWithEmail, signInWithGoogle, signOut, configured: authConfigured } = useAuth();
   const { savePlan, loadPlans, updateProgress } = usePlanStorage(user?.id);
-  const { speak, stop: stopSpeaking, speaking } = useTTS();
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -2300,8 +2259,6 @@ export default function Home() {
                       autoExpandSubtasks
                       doneSubtaskIds={doneSubtaskIds}
                       onToggleSubtask={toggleSubtask}
-                      onSpeak={speak}
-                      isSpeaking={speaking}
                     />
 
                     {/* What's happening in the background */}
@@ -2580,8 +2537,6 @@ export default function Home() {
                   projectSummary={plan?.summary || brief}
                   doneSubtaskIds={doneSubtaskIds}
                   onToggleSubtask={toggleSubtask}
-                  onSpeak={speak}
-                  isSpeaking={speaking}
                 />
               </div>
             )}
