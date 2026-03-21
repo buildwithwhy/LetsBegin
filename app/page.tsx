@@ -8,10 +8,8 @@ import {
   type Subtask,
   type Energy,
   type Assignee,
-  type Status,
   getAllTasks,
   computeUnlocked,
-  findNextActive,
 } from "@/lib/dag";
 import { useAgentExecutor, type AgentResult, type AgentStep } from "@/hooks/useAgentExecutor";
 import { useAuth } from "@/hooks/useAuth";
@@ -1130,7 +1128,7 @@ type ClarifyQuestion = {
 type Step = "input" | "clarify" | "compiling" | "reveal";
 
 export default function Home() {
-  const { user, loading: authLoading, signInWithEmail, signUpWithEmail, signInWithGoogle, signOut, configured: authConfigured } = useAuth();
+  const { user, loading: authLoading, signInWithEmail, signUpWithEmail, signOut, configured: authConfigured } = useAuth();
   const { savePlan, loadPlans, updateProgress } = usePlanStorage(user?.id);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
@@ -1431,27 +1429,6 @@ export default function Home() {
           <div style={{ maxWidth: 380, margin: "60px auto", textAlign: "center" }}>
             <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Welcome to LetsBegin</h2>
             <p style={{ color: "#787774", fontSize: 14, marginBottom: 24 }}>Sign in to save your plans and progress.</p>
-
-            <button
-              onClick={async () => { const { error } = await signInWithGoogle(); if (error) setAuthError(error.message); }}
-              style={{
-                width: "100%",
-                padding: "10px 16px",
-                borderRadius: 10,
-                border: `1px solid ${BORDER}`,
-                background: SURFACE,
-                color: TEXT,
-                fontSize: 14,
-                fontWeight: 500,
-                cursor: "pointer",
-                fontFamily: "'DM Sans', sans-serif",
-                marginBottom: 16,
-              }}
-            >
-              Continue with Google
-            </button>
-
-            <div style={{ fontSize: 12, color: TEXT_LIGHT, marginBottom: 16 }}>or use email</div>
 
             <input
               type="email"

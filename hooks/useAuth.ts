@@ -34,15 +34,12 @@ export function useAuth() {
 
   const signUpWithEmail = useCallback(async (email: string, password: string) => {
     if (!supabaseConfigured) return { error: { message: "Supabase not configured" } };
-    const { error } = await supabase.auth.signUp({ email, password });
-    return { error };
-  }, []);
-
-  const signInWithGoogle = useCallback(async () => {
-    if (!supabaseConfigured) return { error: { message: "Supabase not configured" } };
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: window.location.origin },
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+      },
     });
     return { error };
   }, []);
@@ -52,8 +49,7 @@ export function useAuth() {
     await supabase.auth.signOut();
   }, []);
 
-  // If Supabase isn't configured, skip auth entirely
   const configured = supabaseConfigured;
 
-  return { user, loading, signInWithEmail, signUpWithEmail, signInWithGoogle, signOut, configured };
+  return { user, loading, signInWithEmail, signUpWithEmail, signOut, configured };
 }
