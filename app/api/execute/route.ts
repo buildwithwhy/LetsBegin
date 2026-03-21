@@ -1,19 +1,31 @@
 import { streamText, tool, stepCountIs } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
 
-export const runtime = "edge";
+export const maxDuration = 60;
 
+// Task type detection — preserved for future model routing
 const CODING_KEYWORDS = [
   "code", "build", "implement", "script", "function", "component", "api",
   "endpoint", "database", "schema", "deploy", "configure", "install",
   "setup", "debug", "fix", "refactor",
 ];
 
-function isCodingTask(description: string): boolean {
+function detectTaskType(description: string): "coding" | "writing" {
   const lower = description.toLowerCase();
-  return CODING_KEYWORDS.some((kw) => lower.includes(kw));
+  return CODING_KEYWORDS.some((kw) => lower.includes(kw)) ? "coding" : "writing";
+}
+
+// Model selection — centralized so the orchestrator can override later
+function selectModel(taskType: "coding" | "writing") {
+  // Future: let the orchestrator (or user preferences) pick the best model
+  // e.g., anthropic("claude-sonnet-4-6") for coding, google for writing
+  // For now: Gemini handles everything
+  void taskType;
+  return {
+    model: google("gemini-3-flash-preview"),
+    label: "gemini-flash" as const,
+  };
 }
 
 const codingTools = {
@@ -59,17 +71,12 @@ const writingTools = {
 export async function POST(req: Request) {
   const { taskId, title, description, projectContext } = await req.json();
 
-  const coding = isCodingTask(description);
-
-  const model = coding
-    ? anthropic("claude-sonnet-4-6")
-    : google("gemini-3-flash-preview");
-
-  const modelLabel = coding ? "claude-sonnet" : "gemini-flash";
+  const taskType = detectTaskType(description);
+  const { model, label } = selectModel(taskType);
 
   const result = streamText({
     model,
-    tools: coding ? codingTools : writingTools,
+    tools: taskType === "coding" ? codingTools : writingTools,
     stopWhen: stepCountIs(5),
     prompt: `You are an AI agent working on a project task.
 
@@ -122,7 +129,7 @@ Complete this task using the available tools. Think through the approach, then u
   return new Response(stream, {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
-      "X-Agent-Model": modelLabel,
+      "X-Agent-Model": label,
       "X-Task-Id": taskId,
     },
   });

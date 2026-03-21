@@ -28,16 +28,22 @@ interface ToolResultData {
 
 export function useAgentExecutor() {
   const [results, setResults] = useState<Record<string, AgentResult>>({});
-  const [running, setRunning] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
+  const abortControllers = useRef<Map<string, AbortController>>(new Map());
 
   const execute = useCallback(
     async (taskId: string, title: string, description: string, projectContext: string) => {
-      if (abortRef.current) abortRef.current.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
+      // Don't re-run if already running or completed
+      if (abortControllers.current.has(taskId)) return;
 
-      setRunning(taskId);
+      const controller = new AbortController();
+      abortControllers.current.set(taskId, controller);
+
+      setRunningTasks((prev) => {
+        const next = new Set(prev);
+        next.add(taskId);
+        return next;
+      });
 
       const initial: AgentResult = {
         taskId,
@@ -170,12 +176,20 @@ export function useAgentExecutor() {
           }));
         }
       } finally {
-        setRunning(null);
-        abortRef.current = null;
+        abortControllers.current.delete(taskId);
+        setRunningTasks((prev) => {
+          const next = new Set(prev);
+          next.delete(taskId);
+          return next;
+        });
       }
     },
     []
   );
 
-  return { execute, results, running };
+  // Expose running as first running task id (for header indicator) or null
+  const running = runningTasks.size > 0 ? Array.from(runningTasks)[0] : null;
+  const runningCount = runningTasks.size;
+
+  return { execute, results, running, runningCount, runningTasks };
 }

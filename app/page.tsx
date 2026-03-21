@@ -34,11 +34,13 @@ function Header({
   doneCount,
   total,
   running,
+  runningCount,
 }: {
   plan: Plan | null;
   doneCount: number;
   total: number;
   running: string | null;
+  runningCount: number;
 }) {
   return (
     <header
@@ -101,7 +103,9 @@ function Header({
                 animation: "pulse 1.5s ease-in-out infinite",
               }}
             />
-            <span style={{ fontSize: 12, color: PRIMARY, fontWeight: 500 }}>agent running</span>
+            <span style={{ fontSize: 12, color: PRIMARY, fontWeight: 500 }}>
+              {runningCount > 1 ? `${runningCount} agents running` : "agent running"}
+            </span>
           </div>
         )}
       </div>
@@ -835,7 +839,13 @@ function TaskCard({
         />
       )}
 
-      {isPending && !result && (task.assignee === "agent" || task.assignee === "hybrid") && (
+      {isPending && !result && task.assignee === "agent" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PRIMARY }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: PRIMARY, animation: "pulse 1.5s ease-in-out infinite" }} />
+          Running automatically...
+        </div>
+      )}
+      {isPending && !result && task.assignee === "hybrid" && (
         <button
           onClick={() => onRunAgent(task)}
           style={{
@@ -1111,7 +1121,7 @@ export default function Home() {
   const [assigneeFilter, setAssigneeFilter] = useState<Assignee | "all">("all");
   const [doneSubtaskIds, setDoneSubtaskIds] = useState<Set<string>>(new Set());
 
-  const { execute, results, running } = useAgentExecutor();
+  const { execute, results, running, runningCount } = useAgentExecutor();
 
   // Elapsed timer for compiling phase
   useEffect(() => {
@@ -1148,6 +1158,9 @@ export default function Home() {
     });
   }, []);
 
+  // Track which agent tasks we've already kicked off
+  const launchedAgentTasks = useRef<Set<string>>(new Set());
+
   // Auto-complete agent tasks when result is done
   useEffect(() => {
     for (const [taskId, result] of Object.entries(results)) {
@@ -1160,7 +1173,29 @@ export default function Home() {
     }
   }, [results, allTasks, doneIds, markDone]);
 
+  // Auto-run agent tasks when they become unblocked
+  const currentTasksForAutoRun = getAllTasks(currentNodes);
+  useEffect(() => {
+    if (step !== "reveal" || !plan) return;
+
+    for (const task of currentTasksForAutoRun) {
+      if (
+        task.assignee === "agent" &&
+        task.status === "pending" &&
+        !results[task.id] &&
+        !launchedAgentTasks.current.has(task.id)
+      ) {
+        launchedAgentTasks.current.add(task.id);
+        // Stagger launches slightly to avoid hammering the API
+        setTimeout(() => {
+          execute(task.id, task.title, task.description, plan?.summary || brief);
+        }, launchedAgentTasks.current.size * 500);
+      }
+    }
+  }, [currentTasksForAutoRun, step, plan, results, execute, brief]);
+
   const handleRunAgent = (task: Task) => {
+    launchedAgentTasks.current.add(task.id);
     execute(task.id, task.title, task.description, plan?.summary || brief);
   };
 
@@ -1326,7 +1361,7 @@ export default function Home() {
 
   return (
     <div style={{ minHeight: "100vh" }}>
-      <Header plan={plan} doneCount={doneCount} total={total} running={running} />
+      <Header plan={plan} doneCount={doneCount} total={total} running={running} runningCount={runningCount} />
 
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "40px 20px" }}>
         {/* ─── INPUT ─── */}
@@ -2029,7 +2064,7 @@ export default function Home() {
                     />
 
                     {/* What's happening in the background */}
-                    {running && running !== oneThingTask.id && (
+                    {runningCount > 0 && (
                       <div
                         style={{
                           marginTop: 16,
@@ -2052,7 +2087,7 @@ export default function Home() {
                           }}
                         />
                         <span style={{ fontSize: 12, color: "#787774" }}>
-                          Agent is working on another task in the background...
+                          {runningCount === 1 ? "Agent is working on a task" : `${runningCount} agents working`} in the background...
                         </span>
                       </div>
                     )}
