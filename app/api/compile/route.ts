@@ -1,0 +1,30 @@
+import { streamThinking } from "@/lib/compiler";
+
+export async function POST(req: Request) {
+  const { brief, authority } = await req.json();
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const event of streamThinking(brief, authority)) {
+          const data = JSON.stringify(event) + "\n";
+          controller.enqueue(encoder.encode(data));
+        }
+      } catch (err) {
+        controller.enqueue(
+          encoder.encode(JSON.stringify({ type: "error", text: String(err) }) + "\n")
+        );
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Transfer-Encoding": "chunked",
+    },
+  });
+}
