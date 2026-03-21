@@ -1,5 +1,7 @@
 import { streamThinking } from "@/lib/compiler";
 
+export const maxDuration = 60;
+
 export async function POST(req: Request) {
   const { brief, attachments } = await req.json();
 

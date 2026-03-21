@@ -979,6 +979,7 @@ export default function Home() {
   const [questions, setQuestions] = useState<ClarifyQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [clarifyLoading, setClarifyLoading] = useState(false);
+  const [clarifyError, setClarifyError] = useState("");
   const [questionIndex, setQuestionIndex] = useState(0);
   const [revealMode, setRevealMode] = useState<"onething" | "project">("onething");
   const [thinkingText, setThinkingText] = useState("");
@@ -1053,6 +1054,7 @@ export default function Home() {
 
   const handleClarify = async () => {
     setClarifyLoading(true);
+    setClarifyError("");
     setQuestionIndex(0);
     setStep("clarify");
     try {
@@ -1061,17 +1063,17 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ brief }),
       });
-      if (!res.ok) {
-        console.error("Clarify API error:", res.status);
-        setQuestions([]);
-        return;
-      }
       const text = await res.text();
       let data;
       try {
         data = JSON.parse(text);
       } catch {
-        console.error("Clarify returned non-JSON:", text.slice(0, 200));
+        setClarifyError(`Server returned non-JSON (HTTP ${res.status}): ${text.slice(0, 300)}`);
+        setQuestions([]);
+        return;
+      }
+      if (!res.ok || data.error) {
+        setClarifyError(data.error || `HTTP ${res.status}`);
         setQuestions([]);
         return;
       }
@@ -1083,7 +1085,7 @@ export default function Home() {
       });
       setAnswers(initialAnswers);
     } catch (err) {
-      console.error("Clarify failed:", err);
+      setClarifyError(String(err));
       setQuestions([]);
     } finally {
       setClarifyLoading(false);
@@ -1633,26 +1635,60 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <div style={{ textAlign: "center", padding: "30px 0" }}>
-                <p style={{ color: "#666", fontSize: 14, marginBottom: 16 }}>
-                  Couldn&apos;t generate questions — let&apos;s go straight to planning.
+              <div style={{ padding: "20px 0" }}>
+                <p style={{ color: "#666", fontSize: 14, marginBottom: 12 }}>
+                  Couldn&apos;t generate questions — you can skip ahead or try again.
                 </p>
-                <button
-                  onClick={handleCompile}
-                  style={{
-                    padding: "12px 28px",
-                    border: "none",
-                    borderRadius: 10,
-                    background: PRIMARY,
-                    color: "#fff",
-                    fontSize: 15,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    fontFamily: "'DM Sans', sans-serif",
-                  }}
-                >
-                  Build my plan &rarr;
-                </button>
+                {clarifyError && (
+                  <div style={{
+                    fontSize: 11,
+                    color: "#999",
+                    fontFamily: "'DM Mono', monospace",
+                    background: "#f5f5f5",
+                    padding: 10,
+                    borderRadius: 8,
+                    marginBottom: 16,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    maxHeight: 100,
+                    overflow: "auto",
+                  }}>
+                    {clarifyError}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button
+                    onClick={handleCompile}
+                    style={{
+                      padding: "10px 24px",
+                      border: "none",
+                      borderRadius: 10,
+                      background: PRIMARY,
+                      color: "#fff",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    Skip to plan &rarr;
+                  </button>
+                  <button
+                    onClick={handleClarify}
+                    style={{
+                      padding: "10px 20px",
+                      border: "1px solid #e8e6f0",
+                      borderRadius: 10,
+                      background: "#fff",
+                      color: "#666",
+                      fontSize: 14,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    Try again
+                  </button>
+                </div>
               </div>
             )}
           </div>
