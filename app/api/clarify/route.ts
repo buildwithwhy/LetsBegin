@@ -33,9 +33,9 @@ export async function POST(req: Request) {
 
 "${brief}"
 
-Generate 4-6 clarifying questions. Include THREE categories:
+Generate 5-10 clarifying questions. Include THREE categories:
 
-CATEGORY 1 — Project-specific questions (2-3 questions):
+CATEGORY 1 — Project-specific questions (3-7 questions):
 - What access, accounts, or tools they already have set up
 - Any constraints (timeline, budget, team size)
 - Decisions that would significantly change the plan structure
