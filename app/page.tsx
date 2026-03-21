@@ -807,6 +807,7 @@ function TaskCard({
   doneSubtaskIds,
   onToggleSubtask,
   priorResults,
+  allTasksList,
 }: {
   task: Task;
   result?: AgentResult;
@@ -817,6 +818,7 @@ function TaskCard({
   doneSubtaskIds: Set<string>;
   onToggleSubtask: (id: string) => void;
   priorResults: PriorResult[];
+  allTasksList?: Task[];
 }) {
   const isLocked = task.status === "locked";
   const isDone = task.status === "done";
@@ -921,8 +923,19 @@ function TaskCard({
       </div>
 
       {task.depends_on.length > 0 && isLocked && (
-        <div style={{ fontSize: 11, color: TEXT_LIGHT, marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
-          <span style={{ opacity: 0.6 }}>&#x1F517;</span> Waiting on {task.depends_on.length} task{task.depends_on.length > 1 ? "s" : ""}
+        <div style={{ fontSize: 11, color: TEXT_LIGHT, marginBottom: 8 }}>
+          <span style={{ opacity: 0.6 }}>&#x1F517;</span>{" "}
+          Waiting on:{" "}
+          {task.depends_on.map((depId, i) => {
+            const depTask = allTasksList?.find((t) => t.id === depId);
+            const depName = depTask ? depTask.title : depId;
+            return (
+              <span key={depId}>
+                {i > 0 && ", "}
+                <span style={{ fontWeight: 500 }}>{depName}</span>
+              </span>
+            );
+          })}
         </div>
       )}
 
@@ -1231,6 +1244,7 @@ function DagView({
                 doneSubtaskIds={doneSubtaskIds}
                 onToggleSubtask={onToggleSubtask}
                 priorResults={priorResults}
+                allTasksList={allTasks}
               />
             );
           }
@@ -1267,6 +1281,7 @@ function DagView({
                     doneSubtaskIds={doneSubtaskIds}
                     onToggleSubtask={onToggleSubtask}
                     priorResults={priorResults}
+                    allTasksList={allTasks}
                   />
                 ))}
               </div>
@@ -2507,6 +2522,7 @@ export default function Home() {
                             .map((s) => s.type === "output" ? s.content : "")
                             .join("\n") || "",
                         }))}
+                      allTasksList={allTasks}
                     />
 
                     {/* What's happening in the background */}

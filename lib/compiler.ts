@@ -75,8 +75,8 @@ export async function* streamThinking(
 ${images.length > 0 ? "The user has also attached images for additional context. Analyze them and incorporate what you see into your observations." : ""}
 
 Think out loud about this brief. Make 4-6 short observations about:
-- What ACTUALLY blocks what — be strict. "A depends on B" means A literally cannot start without B's output. Don't assume everything is serial.
-- Where can the human and AI work at the same time? Maximize parallel work between human tasks and agent tasks.
+- What ACTUALLY blocks what — for each dependency, name the specific output that flows from one task to another. If you can't name it, they're independent.
+- Where can the human and AI work at the same time? Most agent and human tasks are independent — identify which ones truly aren't.
 - Which tasks should be done by an AI agent vs a human vs hybrid (agent drafts, human reviews)
 - Any risks or gotchas
 
@@ -124,17 +124,28 @@ Rules:
 - energy is "high" (significant effort), "medium" (moderate effort), or "low" (quick task)
 - Do NOT include subtasks — keep this lean
 
-CRITICAL — DEPENDENCY THINKING:
-Think very carefully about what ACTUALLY blocks what. A dependency means "this task literally cannot start until that task finishes because it needs the OUTPUT of that task."
+CRITICAL — DEPENDENCY RULES:
+A dependency (depends_on) means: "this task LITERALLY CANNOT START without the OUTPUT of that task." Not "it would be nice to do first" — it means IMPOSSIBLE without it.
 
-Common mistakes to avoid:
-- Do NOT make agent tasks depend on user tasks unless the agent literally needs the result. For example, "draft app description" does NOT depend on "register developer account" — the agent can draft text while the user sets up their account.
-- Do NOT create a single serial chain. Most projects have tasks that can run in parallel. Ask yourself: "Can the human be doing something while the agent works on something else?"
-- DO use parallel_group when multiple tasks share the same dependencies and can run at the same time.
-- DO let agent tasks start as early as possible — they should only depend on tasks whose output they actually need.
-- DO think about what the human can do independently vs what requires waiting.
+For EVERY dependency you add, ask: "What specific output from task A does task B need?" If you can't name it, there is no dependency.
 
-The goal is MAXIMUM PARALLELISM between human and agent work. Humans and agents should be busy at the same time whenever possible, not waiting on each other.
+CROSS-TYPE DEPENDENCIES (most important):
+- Agent tasks CAN depend on user tasks IF the agent needs something only the human can provide (e.g., agent needs login credentials the user created, agent needs a file the user uploaded)
+- User tasks CAN depend on agent tasks IF the user needs the agent's output to act (e.g., user reviews a draft the agent wrote)
+- But MOST agent tasks and user tasks are INDEPENDENT and should run in parallel
+- Example: "draft blog post" (agent) and "set up hosting" (user) have NO dependency — they produce different outputs for different purposes
+
+NEVER DO THIS:
+- Serial chain where everything depends on the previous task
+- Agent task waiting on a user task when it doesn't need the user's output
+- User task waiting on an agent task when the user doesn't need the agent's output
+- Marking tasks as dependent just because they're in the same topic area
+
+ALWAYS DO THIS:
+- Multiple tasks with empty depends_on (things that can start immediately)
+- Use parallel_group for tasks with identical dependencies
+- Let agents and humans work simultaneously whenever their tasks are independent
+- Only add a dependency when you can name the SPECIFIC OUTPUT that flows from one task to another
 
 Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the dependency graph is valid — no circular dependencies, and every id referenced in depends_on must exist.`,
   });
