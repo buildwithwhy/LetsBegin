@@ -15,12 +15,16 @@ import {
 } from "@/lib/dag";
 import { useAgentExecutor, type AgentResult, type AgentStep } from "@/hooks/useAgentExecutor";
 
-const PRIMARY = "#5b4bdb";
-const BG = "#f8f7ff";
+const PRIMARY = "#6366A0";
+const BG = "#F7F6F3";
+const BORDER = "#E5E4E0";
+const TEXT = "#37352F";
+const TEXT_LIGHT = "#9B9A97";
+const SURFACE = "#FFFFFF";
 const ENERGY_COLORS: Record<Energy, string> = {
-  high: "#e85d24",
-  medium: "#d4a017",
-  low: "#2a9d6e",
+  high: "#CF522E",
+  medium: "#D4A72C",
+  low: "#2DA44E",
 };
 
 // ─── Header ───
@@ -43,8 +47,8 @@ function Header({
         alignItems: "center",
         justifyContent: "space-between",
         padding: "16px 32px",
-        borderBottom: "1px solid #e8e6f0",
-        background: "#fff",
+        borderBottom: `1px solid ${BORDER}`,
+        background: SURFACE,
         position: "sticky",
         top: 0,
         zIndex: 100,
@@ -53,7 +57,7 @@ function Header({
       <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
         <span style={{ fontSize: 22, fontWeight: 700, color: PRIMARY }}>LetsBegin</span>
         {plan && (
-          <span style={{ fontSize: 14, color: "#666", fontWeight: 500 }}>
+          <span style={{ fontSize: 14, color: "#787774", fontWeight: 500 }}>
             {plan.project_title}
           </span>
         )}
@@ -65,7 +69,7 @@ function Header({
               style={{
                 width: 120,
                 height: 6,
-                background: "#e8e6f0",
+                background: BORDER,
                 borderRadius: 3,
                 overflow: "hidden",
               }}
@@ -80,7 +84,7 @@ function Header({
                 }}
               />
             </div>
-            <span style={{ fontSize: 13, color: "#888" }}>
+            <span style={{ fontSize: 13, color: TEXT_LIGHT }}>
               {doneCount}/{total}
             </span>
           </div>
@@ -118,8 +122,8 @@ function ThinkingTerminal({ text }: { text: string }) {
     <pre
       ref={ref}
       style={{
-        background: "#0f0f14",
-        color: "#a0f0a0",
+        background: "#1C1C1E",
+        color: "#8FBC8F",
         fontFamily: "'DM Mono', 'Fira Code', monospace",
         fontSize: 13,
         lineHeight: 1.6,
@@ -150,8 +154,8 @@ function AgentPanel({
   showApprove?: boolean;
 }) {
   const isClaude = result.model === "claude-sonnet";
-  const badgeBg = isClaude ? "#fff8ee" : "#f3f0ff";
-  const badgeColor = isClaude ? "#c4841d" : PRIMARY;
+  const badgeBg = isClaude ? "#FDF6EE" : "#F0EFEB";
+  const badgeColor = isClaude ? "#C4841D" : PRIMARY;
   const badgeLabel = isClaude ? "Claude Sonnet" : "Gemini Flash";
 
   return (
@@ -174,7 +178,7 @@ function AgentPanel({
       </div>
       <div
         style={{
-          background: "#0f0f14",
+          background: "#1C1C1E",
           borderRadius: 10,
           padding: 14,
           maxHeight: 200,
@@ -188,7 +192,7 @@ function AgentPanel({
           <StepLine key={i} step={step} />
         ))}
         {!result.done && (
-          <span style={{ color: "#a0f0a0", animation: "blink 1s step-end infinite" }}>_</span>
+          <span style={{ color: "#8FBC8F", animation: "blink 1s step-end infinite" }}>_</span>
         )}
       </div>
       {result.steps
@@ -200,7 +204,7 @@ function AgentPanel({
               marginTop: 8,
               borderRadius: 8,
               overflow: "hidden",
-              border: s.outputType === "code" ? "none" : "1px solid #e8e6f0",
+              border: s.outputType === "code" ? "none" : `1px solid ${BORDER}`,
             }}
           >
             {s.outputType === "code" ? (
@@ -208,11 +212,11 @@ function AgentPanel({
                 {s.filename && (
                   <div
                     style={{
-                      background: "#1a1a22",
+                      background: "#1C1C1E",
                       padding: "6px 12px",
                       fontSize: 11,
-                      color: "#888",
-                      borderBottom: "1px solid #2a2a35",
+                      color: TEXT_LIGHT,
+                      borderBottom: "1px solid #2C2C2E",
                     }}
                   >
                     {s.filename}
@@ -220,7 +224,7 @@ function AgentPanel({
                 )}
                 <pre
                   style={{
-                    background: "#1a1a22",
+                    background: "#1C1C1E",
                     color: "#e0e0e0",
                     padding: 14,
                     margin: 0,
@@ -236,7 +240,7 @@ function AgentPanel({
             ) : (
               <div
                 style={{
-                  background: "#fff",
+                  background: SURFACE,
                   padding: 14,
                   fontSize: 13,
                   lineHeight: 1.6,
@@ -249,7 +253,7 @@ function AgentPanel({
           </div>
         ))}
       {result.error && (
-        <div style={{ color: "#e85d24", fontSize: 12, marginTop: 8 }}>Error: {result.error}</div>
+        <div style={{ color: "#CF522E", fontSize: 12, marginTop: 8 }}>Error: {result.error}</div>
       )}
       {showApprove && result.done && onApprove && (
         <button
@@ -276,11 +280,11 @@ function AgentPanel({
 
 function StepLine({ step }: { step: AgentStep }) {
   if (step.type === "thinking") {
-    return <div style={{ color: "#9cceaa" }}>{step.text}</div>;
+    return <div style={{ color: "#8FBC8F" }}>{step.text}</div>;
   }
   if (step.type === "tool_call") {
     return (
-      <div style={{ color: "#f0c060" }}>
+      <div style={{ color: "#D4A72C" }}>
         &gt; {step.summary}
       </div>
     );
@@ -456,10 +460,10 @@ function TaskChat({
         onClick={() => setOpen(true)}
         style={{
           padding: "5px 12px",
-          border: "1px solid #e8e6f0",
+          border: `1px solid ${BORDER}`,
           borderRadius: 6,
           background: "transparent",
-          color: "#888",
+          color: TEXT_LIGHT,
           fontSize: 12,
           cursor: "pointer",
           fontFamily: "'DM Sans', sans-serif",
@@ -475,7 +479,7 @@ function TaskChat({
     <div
       style={{
         marginTop: 12,
-        border: "1px solid #e8e6f0",
+        border: `1px solid ${BORDER}`,
         borderRadius: 10,
         overflow: "hidden",
       }}
@@ -486,8 +490,8 @@ function TaskChat({
           justifyContent: "space-between",
           alignItems: "center",
           padding: "8px 12px",
-          background: "#f8f7ff",
-          borderBottom: "1px solid #e8e6f0",
+          background: "#F0EFEB",
+          borderBottom: `1px solid ${BORDER}`,
         }}
       >
         <span style={{ fontSize: 12, fontWeight: 600, color: PRIMARY }}>Task guide</span>
@@ -496,7 +500,7 @@ function TaskChat({
           style={{
             background: "none",
             border: "none",
-            color: "#999",
+            color: TEXT_LIGHT,
             cursor: "pointer",
             fontSize: 16,
             padding: 0,
@@ -517,7 +521,7 @@ function TaskChat({
         }}
       >
         {messages.length === 0 && (
-          <div style={{ fontSize: 12, color: "#999", textAlign: "center", padding: 12 }}>
+          <div style={{ fontSize: 12, color: TEXT_LIGHT, textAlign: "center", padding: 12 }}>
             Ask anything about this task — how to start, what it means, step-by-step help.
           </div>
         )}
@@ -529,15 +533,15 @@ function TaskChat({
               maxWidth: "85%",
               padding: "8px 12px",
               borderRadius: 10,
-              background: m.role === "user" ? PRIMARY : "#f0eef8",
-              color: m.role === "user" ? "#fff" : "#333",
+              background: m.role === "user" ? PRIMARY : "#EDECE9",
+              color: m.role === "user" ? "#fff" : TEXT,
               fontSize: 13,
               lineHeight: 1.5,
               whiteSpace: "pre-wrap",
             }}
           >
             {m.role === "assistant" ? (
-              <SimpleMarkdown text={m.content} color="#333" />
+              <SimpleMarkdown text={m.content} color={TEXT} />
             ) : (
               m.content
             )}
@@ -553,7 +557,7 @@ function TaskChat({
           display: "flex",
           gap: 8,
           padding: "8px 12px",
-          borderTop: "1px solid #e8e6f0",
+          borderTop: `1px solid ${BORDER}`,
         }}
       >
         <input
@@ -567,7 +571,7 @@ function TaskChat({
             fontSize: 13,
             fontFamily: "'DM Sans', sans-serif",
             borderRadius: 6,
-            border: "1px solid #e8e6f0",
+            border: `1px solid ${BORDER}`,
             outline: "none",
           }}
         />
@@ -644,7 +648,7 @@ function SubtaskList({
       >
         {expanded ? "\u25BC" : "\u25B6"} {subtasks.length} steps
         {doneCount > 0 && (
-          <span style={{ color: "#2a9d6e", fontWeight: 400 }}>
+          <span style={{ color: "#2DA44E", fontWeight: 400 }}>
             ({doneCount}/{subtasks.length} done)
           </span>
         )}
@@ -655,7 +659,7 @@ function SubtaskList({
             if (Array.isArray(group)) {
               return (
                 <div key={gi}>
-                  <div style={{ fontSize: 10, color: "#bbb", marginBottom: 4, marginTop: gi > 0 ? 8 : 0, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  <div style={{ fontSize: 10, color: "#B0AFA8", marginBottom: 4, marginTop: gi > 0 ? 8 : 0, textTransform: "uppercase", letterSpacing: 0.5 }}>
                     Can do at the same time:
                   </div>
                   <div style={{ borderLeft: `2px solid ${PRIMARY}22`, paddingLeft: 10, marginBottom: 6 }}>
@@ -695,8 +699,8 @@ function SubtaskItem({ st, done, onToggle }: { st: Subtask; done: boolean; onTog
           minWidth: 18,
           height: 18,
           borderRadius: 4,
-          border: done ? "none" : "1.5px solid #ddd",
-          background: done ? "#2a9d6e" : "transparent",
+          border: done ? "none" : `1.5px solid ${BORDER}`,
+          background: done ? "#2DA44E" : "transparent",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -719,8 +723,8 @@ function SubtaskItem({ st, done, onToggle }: { st: Subtask; done: boolean; onTog
           fontWeight: 600,
           padding: "1px 5px",
           borderRadius: 4,
-          background: isAgent ? `${PRIMARY}14` : "#e8e6f0",
-          color: isAgent ? PRIMARY : "#888",
+          background: isAgent ? `${PRIMARY}14` : BORDER,
+          color: isAgent ? PRIMARY : TEXT_LIGHT,
           flexShrink: 0,
           marginTop: 2,
         }}
@@ -758,17 +762,17 @@ function TaskCard({
 
   const assigneeConfig = {
     agent: { icon: "\u26A1", label: "Agent", bg: `${PRIMARY}18`, color: PRIMARY },
-    user: { icon: "\uD83D\uDC64", label: "You", bg: "#e8e6f0", color: "#666" },
-    hybrid: { icon: "\uD83E\uDD1D", label: "Review", bg: "#d4a01718", color: "#d4a017" },
+    user: { icon: "\uD83D\uDC64", label: "You", bg: BORDER, color: "#787774" },
+    hybrid: { icon: "\uD83E\uDD1D", label: "Review", bg: "#C4841D14", color: "#C4841D" },
   }[task.assignee];
 
   return (
     <div
       style={{
-        background: "#fff",
+        background: SURFACE,
         borderRadius: 12,
         padding: 18,
-        border: "1px solid #e8e6f0",
+        border: `1px solid ${BORDER}`,
         opacity: isLocked ? 0.32 : isDone ? 0.45 : 1,
         transition: "opacity 0.2s",
       }}
@@ -802,10 +806,10 @@ function TaskCard({
           />
         </div>
         {isLocked && <span style={{ fontSize: 14 }}>&#x1F512;</span>}
-        {isDone && <span style={{ fontSize: 14, color: "#2a9d6e" }}>&checkmark;</span>}
+        {isDone && <span style={{ fontSize: 14, color: "#2DA44E" }}>&checkmark;</span>}
       </div>
       <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{task.title}</div>
-      <div style={{ fontSize: 13, color: "#666", lineHeight: 1.5, marginBottom: 10 }}>
+      <div style={{ fontSize: 13, color: "#787774", lineHeight: 1.5, marginBottom: 10 }}>
         {task.description}
       </div>
 
@@ -926,7 +930,7 @@ function DagView({
             padding: "6px 14px",
             borderRadius: 8,
             border: "none",
-            background: view === "steps" ? PRIMARY : "#e8e6f0",
+            background: view === "steps" ? PRIMARY : BORDER,
             color: view === "steps" ? "#fff" : "#666",
             fontSize: 13,
             fontWeight: 600,
@@ -942,7 +946,7 @@ function DagView({
             padding: "6px 14px",
             borderRadius: 8,
             border: "none",
-            background: view === "graph" ? PRIMARY : "#e8e6f0",
+            background: view === "graph" ? PRIMARY : BORDER,
             color: view === "graph" ? "#fff" : "#666",
             fontSize: 13,
             fontWeight: 600,
@@ -976,7 +980,7 @@ function DagView({
                 <div
                   style={{
                     textAlign: "center",
-                    color: "#999",
+                    color: TEXT_LIGHT,
                     fontSize: 12,
                     fontWeight: 600,
                     letterSpacing: 1,
@@ -1041,7 +1045,7 @@ function AsciiGraph({ nodes }: { nodes: DagNode[] }) {
   return (
     <pre
       style={{
-        background: "#0f0f14",
+        background: "#1C1C1E",
         color: "#e0e0e0",
         fontFamily: "'DM Mono', 'Fira Code', monospace",
         fontSize: 13,
@@ -1315,10 +1319,10 @@ export default function Home() {
         {/* ─── INPUT ─── */}
         {step === "input" && (
           <div>
-            <h1 style={{ fontSize: 36, fontWeight: 700, marginBottom: 8, color: "#1a1a2e" }}>
+            <h1 style={{ fontSize: 36, fontWeight: 700, marginBottom: 8, color: TEXT }}>
               What are we building?
             </h1>
-            <p style={{ color: "#666", fontSize: 16, marginBottom: 28, lineHeight: 1.6 }}>
+            <p style={{ color: "#787774", fontSize: 16, marginBottom: 28, lineHeight: 1.6 }}>
               Most AI tools do the work <em>for you</em>{" "}
               or leave you to figure it out alone. LetsBegin does neither — it
               splits your project into a clear plan where you and the AI each
@@ -1353,10 +1357,10 @@ export default function Home() {
                 <div
                   key={s.num}
                   style={{
-                    background: "#fff",
+                    background: SURFACE,
                     borderRadius: 10,
                     padding: "16px 14px",
-                    border: "1px solid #e8e6f0",
+                    border: `1px solid ${BORDER}`,
                   }}
                 >
                   <div
@@ -1377,7 +1381,7 @@ export default function Home() {
                     {s.num}
                   </div>
                   <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{s.title}</div>
-                  <div style={{ fontSize: 12, color: "#888", lineHeight: 1.5 }}>{s.desc}</div>
+                  <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.5 }}>{s.desc}</div>
                 </div>
               ))}
             </div>
@@ -1385,9 +1389,9 @@ export default function Home() {
             <details
               style={{
                 marginBottom: 28,
-                background: "#fff",
+                background: SURFACE,
                 borderRadius: 10,
-                border: "1px solid #e8e6f0",
+                border: `1px solid ${BORDER}`,
                 padding: "0 16px",
               }}
             >
@@ -1403,7 +1407,7 @@ export default function Home() {
               >
                 How is this different? &darr;
               </summary>
-              <div style={{ paddingBottom: 16, fontSize: 13, color: "#555", lineHeight: 1.7 }}>
+              <div style={{ paddingBottom: 16, fontSize: 13, color: "#787774", lineHeight: 1.7 }}>
                 <p style={{ margin: "0 0 10px" }}>
                   <strong>You never lose the big picture.</strong> A progress bar tracks
                   where you are across the whole project — not just the current chat turn.
@@ -1433,15 +1437,15 @@ export default function Home() {
                 fontSize: 15,
                 fontFamily: "'DM Sans', sans-serif",
                 borderRadius: 12,
-                border: "2px solid #e8e6f0",
-                background: "#fff",
+                border: `2px solid ${BORDER}`,
+                background: SURFACE,
                 outline: "none",
                 resize: "vertical",
                 lineHeight: 1.6,
                 boxSizing: "border-box",
               }}
               onFocus={(e) => (e.target.style.borderColor = PRIMARY)}
-              onBlur={(e) => (e.target.style.borderColor = "#e8e6f0")}
+              onBlur={(e) => (e.target.style.borderColor = BORDER)}
             />
 
             {/* Attachments */}
@@ -1461,7 +1465,7 @@ export default function Home() {
                   border: "1px dashed #ccc",
                   borderRadius: 8,
                   background: "transparent",
-                  color: "#888",
+                  color: TEXT_LIGHT,
                   fontSize: 13,
                   cursor: "pointer",
                   fontFamily: "'DM Sans', sans-serif",
@@ -1478,9 +1482,9 @@ export default function Home() {
                     gap: 6,
                     padding: "4px 10px",
                     borderRadius: 6,
-                    background: "#f0eef8",
+                    background: "#EDECE9",
                     fontSize: 12,
-                    color: "#555",
+                    color: "#787774",
                   }}
                 >
                   <img
@@ -1494,7 +1498,7 @@ export default function Home() {
                     style={{
                       background: "none",
                       border: "none",
-                      color: "#999",
+                      color: TEXT_LIGHT,
                       cursor: "pointer",
                       fontSize: 14,
                       padding: 0,
@@ -1507,7 +1511,7 @@ export default function Home() {
               ))}
             </div>
             {attachments.length > 0 && (
-              <div style={{ marginTop: 6, fontSize: 11, color: "#999" }}>
+              <div style={{ marginTop: 6, fontSize: 11, color: TEXT_LIGHT }}>
                 Images will be analyzed by Gemini to understand your project context.
               </div>
             )}
@@ -1548,7 +1552,7 @@ export default function Home() {
                     animation: "spin 0.8s linear infinite",
                   }}
                 />
-                <span style={{ fontSize: 14, color: "#666" }}>Generating questions...</span>
+                <span style={{ fontSize: 14, color: "#787774" }}>Generating questions...</span>
                 <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
               </div>
             ) : questions.length > 0 ? (
@@ -1562,7 +1566,7 @@ export default function Home() {
                         width: i === questionIndex ? 24 : 8,
                         height: 8,
                         borderRadius: 4,
-                        background: i < questionIndex ? PRIMARY : i === questionIndex ? PRIMARY : "#e8e6f0",
+                        background: i < questionIndex ? PRIMARY : i === questionIndex ? PRIMARY : BORDER,
                         opacity: i < questionIndex ? 0.4 : 1,
                         transition: "all 0.3s ease",
                       }}
@@ -1594,7 +1598,7 @@ export default function Home() {
                               style={{
                                 padding: "12px 32px",
                                 borderRadius: 10,
-                                border: `2px solid ${answers[q.id] === opt ? PRIMARY : "#e8e6f0"}`,
+                                border: `2px solid ${answers[q.id] === opt ? PRIMARY : BORDER}`,
                                 background: answers[q.id] === opt ? `${PRIMARY}0a` : "#fff",
                                 color: answers[q.id] === opt ? PRIMARY : "#555",
                                 fontSize: 15,
@@ -1624,7 +1628,7 @@ export default function Home() {
                               style={{
                                 padding: "12px 16px",
                                 borderRadius: 10,
-                                border: `2px solid ${answers[q.id] === opt ? PRIMARY : "#e8e6f0"}`,
+                                border: `2px solid ${answers[q.id] === opt ? PRIMARY : BORDER}`,
                                 background: answers[q.id] === opt ? `${PRIMARY}0a` : "#fff",
                                 color: answers[q.id] === opt ? PRIMARY : "#555",
                                 fontSize: 14,
@@ -1661,12 +1665,12 @@ export default function Home() {
                             fontSize: 15,
                             fontFamily: "'DM Sans', sans-serif",
                             borderRadius: 10,
-                            border: "2px solid #e8e6f0",
+                            border: `2px solid ${BORDER}`,
                             outline: "none",
                             boxSizing: "border-box",
                           }}
                           onFocus={(e) => (e.target.style.borderColor = PRIMARY)}
-                          onBlur={(e) => (e.target.style.borderColor = "#e8e6f0")}
+                          onBlur={(e) => (e.target.style.borderColor = BORDER)}
                         />
                       )}
                     </div>
@@ -1680,10 +1684,10 @@ export default function Home() {
                       onClick={() => setQuestionIndex((i) => i - 1)}
                       style={{
                         padding: "10px 20px",
-                        border: "1px solid #e8e6f0",
+                        border: `1px solid ${BORDER}`,
                         borderRadius: 10,
-                        background: "#fff",
-                        color: "#666",
+                        background: SURFACE,
+                        color: "#787774",
                         fontSize: 14,
                         cursor: "pointer",
                         fontFamily: "'DM Sans', sans-serif",
@@ -1749,13 +1753,13 @@ export default function Home() {
               </div>
             ) : (
               <div style={{ padding: "20px 0" }}>
-                <p style={{ color: "#666", fontSize: 14, marginBottom: 12 }}>
+                <p style={{ color: "#787774", fontSize: 14, marginBottom: 12 }}>
                   Couldn&apos;t generate questions — you can skip ahead or try again.
                 </p>
                 {clarifyError && (
                   <div style={{
                     fontSize: 11,
-                    color: "#999",
+                    color: TEXT_LIGHT,
                     fontFamily: "'DM Mono', monospace",
                     background: "#f5f5f5",
                     padding: 10,
@@ -1790,10 +1794,10 @@ export default function Home() {
                     onClick={handleClarify}
                     style={{
                       padding: "10px 20px",
-                      border: "1px solid #e8e6f0",
+                      border: `1px solid ${BORDER}`,
                       borderRadius: 10,
-                      background: "#fff",
-                      color: "#666",
+                      background: SURFACE,
+                      color: "#787774",
                       fontSize: 14,
                       cursor: "pointer",
                       fontFamily: "'DM Sans', sans-serif",
@@ -1813,16 +1817,16 @@ export default function Home() {
             {compileStatus.startsWith("error:") ? (
               <div>
                 <div style={{
-                  background: "#fff",
+                  background: SURFACE,
                   borderRadius: 12,
                   padding: 20,
-                  border: "1px solid #e8e6f0",
+                  border: `1px solid ${BORDER}`,
                   marginBottom: 16,
                 }}>
-                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: "#e85d24" }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: "#CF522E" }}>
                     Plan generation failed
                   </div>
-                  <div style={{ fontSize: 12, color: "#888", lineHeight: 1.5, fontFamily: "'DM Mono', monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 120, overflow: "auto" }}>
+                  <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.5, fontFamily: "'DM Mono', monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 120, overflow: "auto" }}>
                     {compileStatus.slice(6)}
                   </div>
                 </div>
@@ -1847,10 +1851,10 @@ export default function Home() {
                     onClick={() => setStep("input")}
                     style={{
                       padding: "10px 20px",
-                      border: "1px solid #e8e6f0",
+                      border: `1px solid ${BORDER}`,
                       borderRadius: 10,
-                      background: "#fff",
-                      color: "#666",
+                      background: SURFACE,
+                      color: "#787774",
                       fontSize: 14,
                       cursor: "pointer",
                       fontFamily: "'DM Sans', sans-serif",
@@ -1881,7 +1885,7 @@ export default function Home() {
                     />
                     <span style={{ fontSize: 16, fontWeight: 600 }}>{compileStatus}</span>
                   </div>
-                  <span style={{ fontSize: 13, color: "#999", fontVariantNumeric: "tabular-nums" }}>
+                  <span style={{ fontSize: 13, color: TEXT_LIGHT, fontVariantNumeric: "tabular-nums" }}>
                     {elapsed}s
                   </span>
                 </div>
@@ -1940,7 +1944,7 @@ export default function Home() {
                 Full Project
               </button>
               <div style={{ flex: 1 }} />
-              <span style={{ fontSize: 13, color: "#999", alignSelf: "center" }}>
+              <span style={{ fontSize: 13, color: TEXT_LIGHT, alignSelf: "center" }}>
                 {doneCount}/{total} done
               </span>
             </div>
@@ -1953,7 +1957,7 @@ export default function Home() {
                   style={{
                     width: "100%",
                     height: 4,
-                    background: "#e8e6f0",
+                    background: BORDER,
                     borderRadius: 2,
                     overflow: "hidden",
                     marginBottom: 28,
@@ -1974,7 +1978,7 @@ export default function Home() {
                   <div style={{ textAlign: "center", padding: "40px 0" }}>
                     <div style={{ fontSize: 48, marginBottom: 12 }}>&#x1F389;</div>
                     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>All done!</h2>
-                    <p style={{ color: "#666", fontSize: 15 }}>
+                    <p style={{ color: "#787774", fontSize: 15 }}>
                       Every task in your plan is complete.
                     </p>
                     <button
@@ -1997,7 +2001,7 @@ export default function Home() {
                   </div>
                 ) : oneThingTask ? (
                   <div>
-                    <div style={{ fontSize: 13, color: "#999", marginBottom: 8 }}>
+                    <div style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 8 }}>
                       Your next task:
                     </div>
                     <TaskCard
@@ -2034,7 +2038,7 @@ export default function Home() {
                             animation: "pulse 1.5s ease-in-out infinite",
                           }}
                         />
-                        <span style={{ fontSize: 12, color: "#666" }}>
+                        <span style={{ fontSize: 12, color: "#787774" }}>
                           Agent is working on another task in the background...
                         </span>
                       </div>
@@ -2048,7 +2052,7 @@ export default function Home() {
                       if (pendingAfter.length === 0) return null;
                       return (
                         <div style={{ marginTop: 24 }}>
-                          <div style={{ fontSize: 12, color: "#bbb", fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                          <div style={{ fontSize: 12, color: "#B0AFA8", fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
                             Up next
                           </div>
                           {pendingAfter.slice(0, 2).map((t) => (
@@ -2057,11 +2061,11 @@ export default function Home() {
                               style={{
                                 padding: "8px 12px",
                                 borderRadius: 8,
-                                background: "#fff",
-                                border: "1px solid #e8e6f0",
+                                background: SURFACE,
+                                border: `1px solid ${BORDER}`,
                                 marginBottom: 6,
                                 fontSize: 13,
-                                color: "#999",
+                                color: TEXT_LIGHT,
                                 display: "flex",
                                 alignItems: "center",
                                 gap: 8,
@@ -2086,7 +2090,7 @@ export default function Home() {
                     })()}
                   </div>
                 ) : (
-                  <div style={{ textAlign: "center", padding: "30px 0", color: "#888" }}>
+                  <div style={{ textAlign: "center", padding: "30px 0", color: TEXT_LIGHT }}>
                     <p style={{ fontSize: 14 }}>
                       No tasks need your attention right now. The agent is working.
                     </p>
@@ -2101,31 +2105,31 @@ export default function Home() {
                 {/* Summary card */}
                 <div
                   style={{
-                    background: "#fff",
+                    background: SURFACE,
                     borderRadius: 14,
                     padding: 22,
-                    border: "1px solid #e8e6f0",
+                    border: `1px solid ${BORDER}`,
                     marginBottom: 24,
                   }}
                 >
                   <h2 style={{ fontSize: 20, fontWeight: 700, marginTop: 0, marginBottom: 8 }}>
                     {plan.project_title}
                   </h2>
-                  <p style={{ fontSize: 14, color: "#555", lineHeight: 1.6, marginBottom: 14 }}>
+                  <p style={{ fontSize: 14, color: "#787774", lineHeight: 1.6, marginBottom: 14 }}>
                     {plan.summary}
                   </p>
-                  <div style={{ display: "flex", gap: 16, fontSize: 13, color: "#888" }}>
+                  <div style={{ display: "flex", gap: 16, fontSize: 13, color: TEXT_LIGHT }}>
                     <span>
                       <strong style={{ color: PRIMARY }}>{agentCount}</strong> agent
                     </span>
                     <span>
-                      <strong style={{ color: "#d4a017" }}>{hybridCount}</strong> hybrid
+                      <strong style={{ color: "#C4841D" }}>{hybridCount}</strong> hybrid
                     </span>
                     <span>
-                      <strong style={{ color: "#666" }}>{userCount}</strong> you
+                      <strong style={{ color: "#787774" }}>{userCount}</strong> you
                     </span>
                     <span>
-                      <strong style={{ color: "#1a1a2e" }}>{total}</strong> total
+                      <strong style={{ color: TEXT }}>{total}</strong> total
                     </span>
                   </div>
                 </div>
@@ -2142,7 +2146,7 @@ export default function Home() {
                           padding: "4px 10px",
                           borderRadius: 6,
                           border: "none",
-                          background: energyFilter === e ? (e === "all" ? PRIMARY : ENERGY_COLORS[e]) : "#e8e6f0",
+                          background: energyFilter === e ? (e === "all" ? PRIMARY : ENERGY_COLORS[e]) : BORDER,
                           color: energyFilter === e ? "#fff" : "#666",
                           fontSize: 11,
                           fontWeight: 600,
@@ -2170,7 +2174,7 @@ export default function Home() {
                           padding: "4px 10px",
                           borderRadius: 6,
                           border: "none",
-                          background: assigneeFilter === f.key ? PRIMARY : "#e8e6f0",
+                          background: assigneeFilter === f.key ? PRIMARY : BORDER,
                           color: assigneeFilter === f.key ? "#fff" : "#666",
                           fontSize: 11,
                           fontWeight: 600,

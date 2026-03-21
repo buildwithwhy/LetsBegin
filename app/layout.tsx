@@ -23,8 +23,8 @@ export default function RootLayout({
         style={{
           margin: 0,
           fontFamily: "'DM Sans', sans-serif",
-          background: "#f8f7ff",
-          color: "#1a1a2e",
+          background: "#F7F6F3",
+          color: "#37352F",
           minHeight: "100vh",
         }}
       >
