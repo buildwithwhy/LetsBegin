@@ -14,6 +14,9 @@ const taskSchema = z.object({
   status: z.literal("pending"),
   depends_on: z.array(z.string()),
   agent_type: z.enum(["builtin", "claude-code", "custom"]).optional(),
+  has_wait_after: z.boolean().optional(),
+  wait_type: z.enum(["response", "build", "approval", "processing", "shipping", "other"]).optional(),
+  estimated_wait: z.enum(["minutes", "hours", "days", "weeks"]).optional(),
 });
 
 const parallelGroupSchema = z.object({
@@ -156,6 +159,22 @@ ALWAYS DO THIS:
 - Use parallel_group for tasks with identical dependencies
 - Let agents and humans work simultaneously whenever their tasks are independent
 - Only add a dependency when you can name the SPECIFIC OUTPUT that flows from one task to another
+
+SCHEDULING INTELLIGENCE — WAIT TIMES:
+For any task where completion triggers a WAIT before the next step can happen, set:
+- has_wait_after: true
+- wait_type: what kind of wait — "response" (waiting for someone to reply), "build" (deploy/compile time), "approval" (someone needs to approve), "processing" (automated processing), "shipping" (physical delivery), "other"
+- estimated_wait: how long — "minutes", "hours", "days", "weeks"
+
+Examples:
+- "Send outreach emails" → has_wait_after: true, wait_type: "response", estimated_wait: "days"
+- "Submit app for review" → has_wait_after: true, wait_type: "approval", estimated_wait: "days"
+- "Deploy to production" → has_wait_after: true, wait_type: "build", estimated_wait: "minutes"
+- "Order equipment" → has_wait_after: true, wait_type: "shipping", estimated_wait: "weeks"
+- "Post on Reddit" → has_wait_after: true, wait_type: "response", estimated_wait: "hours"
+
+This helps the system suggest: "Do this first — you'll be waiting on a response, so start other tasks while you wait."
+Leave these fields unset for tasks with no meaningful wait time after completion.
 
 Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the dependency graph is valid — no circular dependencies, and every id referenced in depends_on must exist.`,
   });

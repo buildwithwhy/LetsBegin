@@ -47,6 +47,10 @@ export interface Task {
   agent_type?: AgentType;  // what kind of agent runs this (for agent/hybrid tasks)
   action_type?: ActionType;  // what real-world action this represents
   recurrence?: Recurrence;  // if this task repeats on a schedule
+  // Scheduling intelligence
+  has_wait_after?: boolean;  // true if this task triggers a wait (email response, build, approval)
+  wait_type?: "response" | "build" | "approval" | "processing" | "shipping" | "other";
+  estimated_wait?: "minutes" | "hours" | "days" | "weeks";
   // Traceability
   activity?: ActivityEvent[];  // traceable log of what happened
   notes?: string;  // human-written notes on this task
@@ -139,4 +143,91 @@ export function addActivity(task: Task, event: ActivityEvent): Task {
     ...task,
     activity: [...(task.activity || []), event],
   };
+}
+
+// ─── Smart task scheduling ───
+// Scores pending tasks by project management best practices:
+// 1. Tasks with long wait times after (emails, approvals) → do first
+// 2. Tasks that unblock the most downstream work → higher priority
+// 3. Agent tasks → kick off early (they run in parallel)
+// 4. Energy matching → respect user's current capacity
+
+export interface TaskPriority {
+  task: Task;
+  score: number;
+  reasons: string[];
+}
+
+export function scoreTasks(
+  pendingTasks: Task[],
+  allTasks: Task[],
+  currentEnergy: Energy | null,
+): TaskPriority[] {
+  // Build a map of how many tasks each task unblocks (downstream count)
+  const downstreamCount = new Map<string, number>();
+  for (const t of allTasks) {
+    for (const dep of t.depends_on) {
+      downstreamCount.set(dep, (downstreamCount.get(dep) || 0) + 1);
+    }
+  }
+
+  // Recursively count total downstream chain length
+  const totalDownstream = (id: string, visited = new Set<string>()): number => {
+    if (visited.has(id)) return 0;
+    visited.add(id);
+    let count = 0;
+    for (const t of allTasks) {
+      if (t.depends_on.includes(id)) {
+        count += 1 + totalDownstream(t.id, visited);
+      }
+    }
+    return count;
+  };
+
+  return pendingTasks.map((task) => {
+    let score = 0;
+    const reasons: string[] = [];
+
+    // 1. Wait time after completion — do these first (biggest impact)
+    if (task.has_wait_after) {
+      const waitScores = { weeks: 50, days: 40, hours: 20, minutes: 10 };
+      const waitScore = waitScores[task.estimated_wait || "days"] || 30;
+      score += waitScore;
+      const waitLabel = task.wait_type === "response" ? "waiting on a response"
+        : task.wait_type === "approval" ? "needs approval"
+        : task.wait_type === "build" ? "build/deploy time"
+        : task.wait_type === "processing" ? "processing time"
+        : task.wait_type === "shipping" ? "shipping time"
+        : "has wait time";
+      reasons.push(`Do first — ${waitLabel} (${task.estimated_wait || "some time"})`);
+    }
+
+    // 2. Unblocks downstream work — critical path
+    const downstream = totalDownstream(task.id);
+    if (downstream > 0) {
+      score += downstream * 8;
+      reasons.push(`Unblocks ${downstream} task${downstream > 1 ? "s" : ""}`);
+    }
+
+    // 3. Agent tasks should be kicked off early (they run in background)
+    if (task.assignee === "agent") {
+      score += 15;
+      reasons.push("Agent task — runs in background");
+    } else if (task.assignee === "hybrid") {
+      score += 10;
+      reasons.push("Start agent draft, then you review");
+    }
+
+    // 4. Energy matching (smaller bonus, tiebreaker)
+    if (currentEnergy && task.energy === currentEnergy) {
+      score += 5;
+      reasons.push("Matches your energy level");
+    }
+    // If low energy, boost low-energy tasks more
+    if (currentEnergy === "low" && task.energy === "low") {
+      score += 5;
+    }
+
+    return { task, score, reasons };
+  }).sort((a, b) => b.score - a.score);
 }

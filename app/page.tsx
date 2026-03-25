@@ -11,6 +11,7 @@ import {
   type ActivityEvent,
   getAllTasks,
   computeUnlocked,
+  scoreTasks,
 } from "@/lib/dag";
 import { useAgentExecutor } from "@/hooks/useAgentExecutor";
 import { useAuth } from "@/hooks/useAuth";
@@ -1423,19 +1424,21 @@ export default function Home() {
 
         {/* ─── REVEAL ─── */}
         {step === "reveal" && plan && (() => {
-          // Find the "one thing" — energy-aware task selection
+          // Find the "one thing" — smart scheduling + energy-aware
           const allCurrentTasks = getAllTasks(currentNodes);
-          const pendingHumanTasks = allCurrentTasks.filter(
-            (t) => t.status === "pending" && (t.assignee === "user" || t.assignee === "hybrid")
+          const pendingTasks = allCurrentTasks.filter((t) => t.status === "pending");
+          const pendingHumanTasks = pendingTasks.filter(
+            (t) => t.assignee === "user" || t.assignee === "hybrid"
           );
-          // If user picked an energy level, prefer matching tasks
-          let oneThingTask: Task | undefined;
-          if (currentEnergy && pendingHumanTasks.length > 0) {
-            oneThingTask = pendingHumanTasks.find((t) => t.energy === currentEnergy)
-              || pendingHumanTasks[0];
-          } else {
-            oneThingTask = pendingHumanTasks[0] || allCurrentTasks.find((t) => t.status === "pending");
-          }
+          // Score all pending tasks by project management best practices
+          const scoredTasks = scoreTasks(
+            pendingHumanTasks.length > 0 ? pendingHumanTasks : pendingTasks,
+            allTasks,
+            currentEnergy,
+          );
+          const topPriority = scoredTasks[0];
+          const oneThingTask: Task | undefined = topPriority?.task;
+          const oneThingReasons = topPriority?.reasons || [];
           const allDone = allCurrentTasks.every((t) => doneIds.has(t.id));
 
           return (
@@ -1652,7 +1655,20 @@ export default function Home() {
                     <div style={{ fontSize: 14, color: TEXT_LIGHT, marginBottom: 4 }}>
                       {oneThingTask.assignee === "user" ? "Focus on this one thing:" : "Next up:"}
                     </div>
-                    {oneThingTask.energy && (
+                    {/* Smart scheduling reasons */}
+                    {oneThingReasons.length > 0 && (
+                      <div style={{ fontSize: 11, color: PRIMARY, marginBottom: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {oneThingReasons.map((reason, i) => (
+                          <span key={i} style={{
+                            padding: "2px 8px", borderRadius: 5,
+                            background: `${PRIMARY}10`, fontSize: 11,
+                          }}>
+                            {reason}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {oneThingTask.energy && oneThingReasons.length === 0 && (
                       <div style={{ fontSize: 11, color: ENERGY_COLORS[oneThingTask.energy], marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
                         <span style={{ width: 6, height: 6, borderRadius: "50%", background: ENERGY_COLORS[oneThingTask.energy] }} />
                         {oneThingTask.energy === "low" ? "Quick one" : oneThingTask.energy === "medium" ? "Moderate effort" : "This one takes focus"}
