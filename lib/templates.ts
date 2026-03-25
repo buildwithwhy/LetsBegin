@@ -141,6 +141,34 @@ I need:
 - Set up monitoring and error handling
 - Test with real data end-to-end`,
   },
+  {
+    id: "research-outreach",
+    title: "Research / academic outreach",
+    icon: "\uD83D\uDCDA",
+    category: "outreach",
+    brief: `Reach out to people I've referenced, cited, or am connected to professionally.
+
+I need:
+- Extract all the people/authors from my references or document
+- Research each person — find their email, website, social profiles
+- Draft personalized outreach emails explaining the connection and ask
+- Create a tracking sheet for who I've contacted and their responses
+- Plan follow-up timing and messaging`,
+  },
+  {
+    id: "batch-outreach",
+    title: "Batch email campaign",
+    icon: "\uD83D\uDCE8",
+    category: "outreach",
+    brief: `Send personalized emails to a list of people — not mass-blast, each one tailored.
+
+I need:
+- Define the target list and what I know about each person
+- Draft a personalized email for each person (not template — actually personalized)
+- Review all drafts before sending
+- Create a follow-up sequence for non-responders
+- Track responses and next steps`,
+  },
 ];
 
 export function getTemplatesByCategory(category?: string): ProjectTemplate[] {

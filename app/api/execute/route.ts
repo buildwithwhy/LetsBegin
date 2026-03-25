@@ -103,6 +103,37 @@ const writingTools = {
     }),
     execute: async (input) => input,
   }),
+  batchDraftEmails: tool({
+    description: "Draft multiple personalized emails at once — for outreach campaigns, batch notifications, endorsement requests, etc. Each email is personalized to the recipient.",
+    inputSchema: z.object({
+      campaign_name: z.string().describe("Name of this email campaign"),
+      template_notes: z.string().describe("Common elements and tone across all emails"),
+      emails: z.array(z.object({
+        to: z.string().describe("Recipient name and role/context"),
+        subject: z.string(),
+        body: z.string().describe("Fully personalized email body"),
+        personalization_notes: z.string().optional().describe("What makes this email unique to this recipient"),
+      })),
+      follow_up_plan: z.string().optional().describe("When and how to follow up if no response"),
+    }),
+    execute: async (input) => input,
+  }),
+  extractAndResearch: tool({
+    description: "Extract information from a document/list and research each item — find contact info, details, context. Great for finding authors from references, extracting names from lists, researching companies from a directory, etc.",
+    inputSchema: z.object({
+      source_description: z.string().describe("What we're extracting from"),
+      extracted_items: z.array(z.object({
+        name: z.string(),
+        role: z.string().optional().describe("Role, title, or relationship"),
+        context: z.string().describe("Why this person/item is relevant"),
+        contact_info: z.string().optional().describe("Email, website, social, or how to find them"),
+        notes: z.string().optional().describe("Any additional useful context"),
+      })),
+      total_found: z.number(),
+      research_notes: z.string().optional().describe("General notes about the research process"),
+    }),
+    execute: async (input) => input,
+  }),
 };
 
 export async function POST(req: Request) {

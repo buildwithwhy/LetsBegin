@@ -1619,6 +1619,16 @@ function generateAgentPrompt(task: Task, projectContext: string, priorOutputs?: 
     lines.push("");
     lines.push("**This is a hybrid task** — you draft, then I review. Present options clearly so I can choose. Label drafts as drafts.");
   }
+  // Detect batch/outreach tasks and add specific guidance
+  const lower = task.description.toLowerCase() + " " + task.title.toLowerCase();
+  if (lower.includes("email") && (lower.includes("batch") || lower.includes("all") || lower.includes("each") || lower.includes("personalize"))) {
+    lines.push("");
+    lines.push("**Batch email guidance:** Draft EACH email individually — fully personalized, not template-with-blanks. Include subject line, full body, and note what makes each one unique. I need to be able to copy-paste each one directly.");
+  }
+  if (lower.includes("extract") || lower.includes("reference") || lower.includes("cited") || lower.includes("author")) {
+    lines.push("");
+    lines.push("**Research guidance:** For each person/item found, include their name, role/affiliation, why they're relevant, and how to contact them (email, website, social). Be thorough — I'll use this list to actually reach out.");
+  }
   return lines.join("\n");
 }
 

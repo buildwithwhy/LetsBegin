@@ -50,6 +50,16 @@ interface ToolResultData {
   total_count?: number;
   // Config tools
   format?: string;
+  // Batch email tools
+  campaign_name?: string;
+  template_notes?: string;
+  emails?: { to: string; subject: string; body: string; personalization_notes?: string }[];
+  follow_up_plan?: string;
+  // Extract and research tools
+  source_description?: string;
+  extracted_items?: { name: string; role?: string; context: string; contact_info?: string; notes?: string }[];
+  total_found?: number;
+  research_notes?: string;
 }
 
 export function useAgentExecutor() {
@@ -187,6 +197,31 @@ export function useAgentExecutor() {
                     if (result.recommendations) {
                       content += "\n**Recommendations:**\n" + result.recommendations.map((r: string) => `- ${r}`).join("\n");
                     }
+                    steps.push({ type: "output", content, outputType: "writing" });
+                  // Batch emails
+                  } else if (result.emails && result.campaign_name) {
+                    let content = `**${result.campaign_name}**\n`;
+                    if (result.template_notes) content += `*${result.template_notes}*\n\n`;
+                    for (let i = 0; i < result.emails.length; i++) {
+                      const email = result.emails[i];
+                      content += `---\n### Email ${i + 1}: ${email.to}\n**Subject:** ${email.subject}\n\n${email.body}`;
+                      if (email.personalization_notes) content += `\n\n*Personalization: ${email.personalization_notes}*`;
+                      content += "\n\n";
+                    }
+                    if (result.follow_up_plan) content += `---\n**Follow-up plan:** ${result.follow_up_plan}`;
+                    steps.push({ type: "output", content, outputType: "writing" });
+                  // Extract and research
+                  } else if (result.extracted_items && result.source_description) {
+                    let content = `**Extracted from:** ${result.source_description}\n**Found:** ${result.total_found || result.extracted_items.length} items\n\n`;
+                    for (const item of result.extracted_items) {
+                      content += `### ${item.name}`;
+                      if (item.role) content += ` — ${item.role}`;
+                      content += `\n${item.context}`;
+                      if (item.contact_info) content += `\n**Contact:** ${item.contact_info}`;
+                      if (item.notes) content += `\n*${item.notes}*`;
+                      content += "\n\n";
+                    }
+                    if (result.research_notes) content += `---\n*${result.research_notes}*`;
                     steps.push({ type: "output", content, outputType: "writing" });
                   // Plain research
                   } else if (result.findings) {
