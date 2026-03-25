@@ -1,6 +1,9 @@
 import { generateObject } from "ai";
 import { z } from "zod";
 import { selectModel } from "@/lib/models";
+import type { ClarifyQuestion } from "@/lib/styles";
+
+export type { ClarifyQuestion };
 
 export const maxDuration = 30;
 
@@ -14,13 +17,6 @@ const questionsSchema = z.object({
     })
   ),
 });
-
-export type ClarifyQuestion = {
-  id: string;
-  question: string;
-  type: "yes_no" | "choice" | "short";
-  options?: string[];
-};
 
 export async function POST(req: Request) {
   const { brief } = await req.json();

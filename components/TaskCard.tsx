@@ -6,9 +6,10 @@ import { ExecutionMode, PriorResult, TaskRouting, UserToolConfig, routeTask } fr
 import { Task, Subtask, DagNode, Energy, AgentType, ActivityEvent } from "@/lib/dag";
 import { AgentResult, AgentStep } from "@/hooks/useAgentExecutor";
 import { AgentPanel } from "@/components/AgentPanel";
-import { SubtaskList } from "@/components/SubtaskList";
+import { SubtaskList, SubtaskItem } from "@/components/SubtaskList";
 import { TaskChat } from "@/components/TaskChat";
 import { ByoAgentPanel } from "@/components/ByoAgentPanel";
+import { formatDuration } from "@/lib/utils";
 
 // ─── Helpers ───
 
@@ -22,73 +23,6 @@ function inferTaskType(task: Task): "coding" | "writing" | "research" | "plannin
   if (lower.match(/plan|design|architect|strategy|roadmap|outline/)) return "planning";
   if (lower.match(/review|audit|check|evaluate|assess|approve/)) return "review";
   return "writing";
-}
-
-function formatDuration(startedAt: string, completedAt?: string): string {
-  const start = new Date(startedAt).getTime();
-  const end = completedAt ? new Date(completedAt).getTime() : Date.now();
-  const seconds = Math.round((end - start) / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${minutes}m ${secs}s`;
-}
-
-function SubtaskItem({ st, done, onToggle }: { st: Subtask; done: boolean; onToggle: (id: string) => void }) {
-  const isAgent = st.assignee === "agent";
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 8,
-        alignItems: "flex-start",
-        marginBottom: 6,
-        fontSize: 12,
-        color: done ? "#bbb" : "#666",
-        lineHeight: 1.5,
-        opacity: done ? 0.6 : 1,
-      }}
-    >
-      <button
-        onClick={() => onToggle(st.id)}
-        style={{
-          minWidth: 18,
-          height: 18,
-          borderRadius: 4,
-          border: done ? "none" : `1.5px solid ${BORDER}`,
-          background: done ? "#2DA44E" : "transparent",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 10,
-          color: done ? "#fff" : "#bbb",
-          flexShrink: 0,
-          marginTop: 1,
-          cursor: "pointer",
-          padding: 0,
-        }}
-      >
-        {done ? "\u2713" : ""}
-      </button>
-      <span style={{ textDecoration: done ? "line-through" : "none", flex: 1 }}>
-        {st.title}
-      </span>
-      <span
-        style={{
-          fontSize: 9,
-          fontWeight: 600,
-          padding: "1px 5px",
-          borderRadius: 4,
-          background: isAgent ? `${PRIMARY}14` : BORDER,
-          color: isAgent ? PRIMARY : TEXT_LIGHT,
-          flexShrink: 0,
-          marginTop: 2,
-        }}
-      >
-        {isAgent ? "AI" : "You"}
-      </span>
-    </div>
-  );
 }
 
 // ─── ActivityLog ───

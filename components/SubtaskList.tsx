@@ -4,7 +4,7 @@ import { useState } from "react";
 import { PRIMARY, BORDER, TEXT_LIGHT } from "@/lib/styles";
 import { Subtask } from "@/lib/dag";
 
-function SubtaskItem({ st, done, onToggle }: { st: Subtask; done: boolean; onToggle: (id: string) => void }) {
+export function SubtaskItem({ st, done, onToggle }: { st: Subtask; done: boolean; onToggle: (id: string) => void }) {
   const isAgent = st.assignee === "agent";
   return (
     <div

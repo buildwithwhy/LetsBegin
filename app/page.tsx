@@ -30,7 +30,7 @@ import { DagView } from "@/components/DagView";
 
 export default function Home() {
   const { user, loading: authLoading, signInWithEmail, signUpWithEmail, signOut, configured: authConfigured } = useAuth();
-  const { savePlan, loadPlans, updateProgress } = usePlanStorage(user?.id);
+  const { savePlan, loadPlans, updateProgress, deletePlan } = usePlanStorage(user?.id);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -134,6 +134,7 @@ export default function Home() {
   }, []);
 
   const startNewProject = useCallback(() => {
+    if (plan && !confirm("Start a new project? Your current progress is saved.")) return;
     setBrief("");
     setPlan(null);
     setDoneIds(new Set());
@@ -144,7 +145,7 @@ export default function Home() {
     setStreak(0);
     setShowBreakReminder(false);
     setStep("input");
-  }, []);
+  }, [plan]);
 
   const goToDashboard = useCallback(() => {
     setStep("dashboard");
@@ -633,17 +634,45 @@ export default function Home() {
                           Updated {new Date(saved.updated_at).toLocaleDateString()}
                         </div>
                       </div>
-                      <div style={{ textAlign: "right", flexShrink: 0 }}>
-                        <div style={{ fontSize: 20, fontWeight: 700, color: isComplete ? "#2DA44E" : PRIMARY }}>
-                          {pct}%
+                      <div style={{ textAlign: "right", flexShrink: 0, display: "flex", alignItems: "center", gap: 12 }}>
+                        <div>
+                          <div style={{ fontSize: 20, fontWeight: 700, color: isComplete ? "#2DA44E" : PRIMARY }}>
+                            {pct}%
+                          </div>
+                          <div style={{ fontSize: 11, color: TEXT_LIGHT }}>
+                            {done}/{totalTasks} tasks
+                          </div>
+                          {/* Mini progress bar */}
+                          <div style={{ width: 60, height: 4, background: BORDER, borderRadius: 2, marginTop: 4, overflow: "hidden" }}>
+                            <div style={{ width: `${pct}%`, height: "100%", background: isComplete ? "#2DA44E" : PRIMARY, borderRadius: 2 }} />
+                          </div>
                         </div>
-                        <div style={{ fontSize: 11, color: TEXT_LIGHT }}>
-                          {done}/{totalTasks} tasks
-                        </div>
-                        {/* Mini progress bar */}
-                        <div style={{ width: 60, height: 4, background: BORDER, borderRadius: 2, marginTop: 4, overflow: "hidden" }}>
-                          <div style={{ width: `${pct}%`, height: "100%", background: isComplete ? "#2DA44E" : PRIMARY, borderRadius: 2 }} />
-                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm("Delete this project?")) {
+                              deletePlan(saved.id).then(() => {
+                                setSavedPlans((prev) => prev.filter((p) => p.id !== saved.id));
+                              });
+                            }
+                          }}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: TEXT_LIGHT,
+                            fontSize: 16,
+                            cursor: "pointer",
+                            padding: "4px 6px",
+                            borderRadius: 4,
+                            opacity: 0.5,
+                            transition: "opacity 0.15s",
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                          onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.5")}
+                          title="Delete project"
+                        >
+                          &times;
+                        </button>
                       </div>
                     </div>
                   );
@@ -798,7 +827,7 @@ export default function Home() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
+                gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
                 gap: 14,
                 marginBottom: 32,
               }}
@@ -1144,21 +1173,22 @@ export default function Home() {
 
             <button
               onClick={handleClarify}
-              disabled={brief.trim().length < 10}
+              disabled={brief.trim().length < 10 || clarifyLoading}
               style={{
                 marginTop: 16,
                 padding: "12px 32px",
                 border: "none",
                 borderRadius: 10,
-                background: brief.trim().length < 10 ? "#ccc" : PRIMARY,
+                background: (brief.trim().length < 10 || clarifyLoading) ? "#ccc" : PRIMARY,
                 color: "#fff",
                 fontSize: 15,
                 fontWeight: 600,
-                cursor: brief.trim().length < 10 ? "not-allowed" : "pointer",
+                cursor: (brief.trim().length < 10 || clarifyLoading) ? "not-allowed" : "pointer",
+                opacity: clarifyLoading ? 0.6 : 1,
                 fontFamily: "'DM Sans', sans-serif",
               }}
             >
-              Continue &rarr;
+              {clarifyLoading ? "Loading..." : "Continue \u2192"}
             </button>
           </div>
         )}
@@ -1342,15 +1372,17 @@ export default function Home() {
                   ) : (
                     <button
                       onClick={handleCompile}
+                      disabled={compileStartTime !== null}
                       style={{
                         padding: "10px 28px",
                         border: "none",
                         borderRadius: 10,
-                        background: PRIMARY,
+                        background: compileStartTime !== null ? "#ccc" : PRIMARY,
                         color: "#fff",
                         fontSize: 14,
                         fontWeight: 600,
-                        cursor: "pointer",
+                        cursor: compileStartTime !== null ? "not-allowed" : "pointer",
+                        opacity: compileStartTime !== null ? 0.6 : 1,
                         fontFamily: "'DM Sans', sans-serif",
                       }}
                     >
@@ -1719,7 +1751,7 @@ export default function Home() {
                     <div style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 8 }}>
                       How&apos;s your energy right now?
                     </div>
-                    <div style={{ display: "flex", gap: 8 }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       {([
                         { level: "low" as Energy, label: "Low — give me something easy", color: "#2DA44E" },
                         { level: "medium" as Energy, label: "Okay — moderate is fine", color: "#D4A72C" },

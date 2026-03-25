@@ -28,6 +28,8 @@ export function Header({
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
+        flexWrap: "wrap",
+        gap: 8,
         padding: "16px 32px",
         borderBottom: `1px solid ${BORDER}`,
         background: SURFACE,
@@ -115,7 +117,8 @@ export function Header({
           </div>
         )}
       </div>
-      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }`}</style>
     </header>
   );
 }
