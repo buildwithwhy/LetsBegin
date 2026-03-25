@@ -1,5 +1,5 @@
 import { streamText } from "ai";
-import { google } from "@ai-sdk/google";
+import { selectModel } from "@/lib/models";
 
 export const maxDuration = 30;
 
@@ -26,8 +26,11 @@ export async function POST(req: Request) {
     }
   }
 
+  // Claude for chat — better context handling and reasoning
+  const { model } = selectModel("chat");
+
   const result = streamText({
-    model: google("gemini-3-flash-preview"),
+    model,
     system: `You are a helpful assistant guiding a user through a specific task in their project.
 
 Project context: ${projectSummary}

@@ -2,6 +2,9 @@ export type Energy = "high" | "medium" | "low";
 export type Assignee = "agent" | "user" | "hybrid";
 export type Status = "locked" | "pending" | "done" | "skipped";
 
+// What kind of agent handles this task
+export type AgentType = "builtin" | "claude-code" | "custom";
+
 export interface Subtask {
   id: string;
   title: string;
@@ -9,6 +12,16 @@ export interface Subtask {
   depends_on: string[]; // ids of other subtasks within the same task
   parallel_with?: string[]; // ids of subtasks that can run simultaneously
 }
+
+// Activity events — make human work visible and traceable
+export type ActivityEvent =
+  | { type: "started"; at: string }
+  | { type: "completed"; at: string }
+  | { type: "note"; text: string; at: string }
+  | { type: "agent_started"; agent: AgentType; model: string; at: string }
+  | { type: "agent_completed"; agent: AgentType; model: string; at: string }
+  | { type: "approved"; at: string }
+  | { type: "regenerated"; at: string };
 
 export interface Task {
   id: string;
@@ -20,6 +33,12 @@ export interface Task {
   status: Status;
   depends_on: string[];
   subtasks?: Subtask[];
+  // New fields for rearchitecture
+  agent_type?: AgentType;  // what kind of agent runs this (for agent/hybrid tasks)
+  activity?: ActivityEvent[];  // traceable log of what happened
+  notes?: string;  // human-written notes on this task
+  started_at?: string;  // when this task was first acted on
+  completed_at?: string;  // when this task was marked done
 }
 
 export interface ParallelGroup {
@@ -99,4 +118,12 @@ export function findNextActive(nodes: DagNode[]): string | null {
     }
   }
   return null;
+}
+
+// Add an activity event to a task (returns new task)
+export function addActivity(task: Task, event: ActivityEvent): Task {
+  return {
+    ...task,
+    activity: [...(task.activity || []), event],
+  };
 }

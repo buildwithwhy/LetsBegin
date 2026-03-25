@@ -8,6 +8,8 @@ import {
   type Subtask,
   type Energy,
   type Assignee,
+  type AgentType,
+  type ActivityEvent,
   getAllTasks,
   computeUnlocked,
 } from "@/lib/dag";
@@ -174,6 +176,29 @@ function ThinkingTerminal({ text }: { text: string }) {
 
 // ─── AgentPanel ───
 
+function agentTypeDisplay(agentType: AgentType, model: string) {
+  switch (agentType) {
+    case "claude-code":
+      return { label: "Claude Code", bg: "#FDF6EE", color: "#C4841D", icon: "\u{1F9E0}" };
+    case "builtin":
+      return model === "claude-sonnet"
+        ? { label: "Claude", bg: "#FDF6EE", color: "#C4841D", icon: "\u26A1" }
+        : { label: "Built-in Agent", bg: "#F0EFEB", color: PRIMARY, icon: "\u26A1" };
+    case "custom":
+      return { label: "Custom Agent", bg: "#E8F5E9", color: "#2E7D32", icon: "\u{1F527}" };
+  }
+}
+
+function formatDuration(startedAt: string, completedAt?: string): string {
+  const start = new Date(startedAt).getTime();
+  const end = completedAt ? new Date(completedAt).getTime() : Date.now();
+  const seconds = Math.round((end - start) / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${minutes}m ${secs}s`;
+}
+
 function AgentPanel({
   result,
   onApprove,
@@ -185,10 +210,10 @@ function AgentPanel({
   onRegenerate?: () => void;
   showApprove?: boolean;
 }) {
-  const isClaude = result.model === "claude-sonnet";
-  const badgeBg = isClaude ? "#FDF6EE" : "#F0EFEB";
-  const badgeColor = isClaude ? "#C4841D" : PRIMARY;
-  const badgeLabel = isClaude ? "Claude Sonnet" : "Gemini Flash";
+  const display = agentTypeDisplay(result.agentType, result.model);
+  const badgeBg = display.bg;
+  const badgeColor = display.color;
+  const badgeLabel = `${display.icon} ${display.label}`;
 
   return (
     <div style={{ marginTop: 12 }}>
@@ -207,6 +232,11 @@ function AgentPanel({
         }}
       >
         {badgeLabel}
+        {result.startedAt && (
+          <span style={{ marginLeft: 8, fontWeight: 400, opacity: 0.7, fontSize: 11 }}>
+            {formatDuration(result.startedAt, result.completedAt)}
+          </span>
+        )}
       </div>
       <div
         style={{
@@ -797,11 +827,44 @@ function SubtaskItem({ st, done, onToggle }: { st: Subtask; done: boolean; onTog
 
 // ─── TaskCard ───
 
+// Activity log display for a task
+function ActivityLog({ activity }: { activity?: ActivityEvent[] }) {
+  if (!activity || activity.length === 0) return null;
+  return (
+    <div style={{ marginTop: 10, borderTop: `1px solid ${BORDER}`, paddingTop: 8 }}>
+      <div style={{ fontSize: 10, color: "#B0AFA8", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
+        Activity
+      </div>
+      {activity.slice(-5).map((evt, i) => {
+        const time = new Date(evt.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        let label = "";
+        let color = TEXT_LIGHT;
+        switch (evt.type) {
+          case "started": label = "Started"; color = PRIMARY; break;
+          case "completed": label = "Completed"; color = "#2DA44E"; break;
+          case "note": label = `Note: ${evt.text}`; break;
+          case "agent_started": label = `${evt.agent === "claude-code" ? "Claude Code" : "Agent"} started`; color = PRIMARY; break;
+          case "agent_completed": label = `${evt.agent === "claude-code" ? "Claude Code" : "Agent"} finished`; color = "#2DA44E"; break;
+          case "approved": label = "Approved"; color = "#C4841D"; break;
+          case "regenerated": label = "Regenerated"; color = "#CF522E"; break;
+        }
+        return (
+          <div key={i} style={{ display: "flex", gap: 8, fontSize: 11, lineHeight: 1.6, color }}>
+            <span style={{ color: "#B0AFA8", flexShrink: 0 }}>{time}</span>
+            <span>{label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function TaskCard({
   task,
   result,
   onMarkDone,
   onRunAgent,
+  onAddNote,
   projectSummary,
   autoExpandSubtasks = false,
   doneSubtaskIds,
@@ -811,8 +874,9 @@ function TaskCard({
 }: {
   task: Task;
   result?: AgentResult;
-  onMarkDone: (id: string) => void;
+  onMarkDone: (id: string, notes?: string) => void;
   onRunAgent: (task: Task, force?: boolean) => void;
+  onAddNote: (id: string, note: string) => void;
   projectSummary: string;
   autoExpandSubtasks?: boolean;
   doneSubtaskIds: Set<string>;
@@ -824,9 +888,13 @@ function TaskCard({
   const isDone = task.status === "done";
   const isPending = task.status === "pending";
   const [doneExpanded, setDoneExpanded] = useState(false);
+  const [noteText, setNoteText] = useState(task.notes || "");
+  const [showNotes, setShowNotes] = useState(false);
 
+  const agentLabel = task.agent_type === "claude-code" ? "Claude Code"
+    : task.agent_type === "custom" ? "Custom Agent" : "Agent";
   const assigneeConfig = {
-    agent: { icon: "\u26A1", label: "Agent", bg: `${PRIMARY}18`, color: PRIMARY },
+    agent: { icon: task.agent_type === "claude-code" ? "\uD83E\uDDE0" : "\u26A1", label: agentLabel, bg: task.agent_type === "claude-code" ? "#FDF6EE" : `${PRIMARY}18`, color: task.agent_type === "claude-code" ? "#C4841D" : PRIMARY },
     user: { icon: "\uD83D\uDC64", label: "You", bg: BORDER, color: "#787774" },
     hybrid: { icon: "\uD83E\uDD1D", label: "Review", bg: "#C4841D14", color: "#C4841D" },
   }[task.assignee];
@@ -973,23 +1041,84 @@ function TaskCard({
         </button>
       )}
       {isPending && !result && task.assignee === "user" && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button
-            onClick={() => onMarkDone(task.id)}
-            style={{
-              padding: "7px 16px",
-              border: `1px solid ${PRIMARY}`,
-              borderRadius: 8,
-              background: "transparent",
-              color: PRIMARY,
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
-              fontFamily: "'DM Sans', sans-serif",
-            }}
-          >
-            Mark done &rarr;
-          </button>
+        <div>
+          {/* Notes section for human tasks */}
+          <div style={{ marginBottom: 8 }}>
+            {!showNotes ? (
+              <button
+                onClick={() => setShowNotes(true)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  fontSize: 12,
+                  color: TEXT_LIGHT,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                + Add notes
+              </button>
+            ) : (
+              <div>
+                <textarea
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  placeholder="What did you do? Any links, screenshots, or notes for future reference..."
+                  style={{
+                    width: "100%",
+                    minHeight: 60,
+                    padding: 10,
+                    fontSize: 12,
+                    fontFamily: "'DM Sans', sans-serif",
+                    borderRadius: 8,
+                    border: `1px solid ${BORDER}`,
+                    background: "#FAFAF9",
+                    outline: "none",
+                    resize: "vertical",
+                    lineHeight: 1.5,
+                    boxSizing: "border-box",
+                    marginBottom: 6,
+                  }}
+                />
+                {noteText.trim() && (
+                  <button
+                    onClick={() => { onAddNote(task.id, noteText.trim()); }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      fontSize: 11,
+                      color: PRIMARY,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Save note
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              onClick={() => onMarkDone(task.id, noteText.trim() || undefined)}
+              style={{
+                padding: "7px 16px",
+                border: `1px solid ${PRIMARY}`,
+                borderRadius: 8,
+                background: "transparent",
+                color: PRIMARY,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "'DM Sans', sans-serif",
+              }}
+            >
+              Mark done &rarr;
+            </button>
+          </div>
         </div>
       )}
 
@@ -1121,6 +1250,37 @@ function TaskCard({
       {result && task.assignee === "agent" && (
         <AgentPanel result={result} />
       )}
+
+      {/* Task notes display (for done tasks) */}
+      {isDone && task.notes && (
+        <div style={{
+          marginTop: 8,
+          padding: "8px 12px",
+          borderRadius: 6,
+          background: "#FAFAF9",
+          border: `1px solid ${BORDER}`,
+          fontSize: 12,
+          color: "#787774",
+          lineHeight: 1.5,
+        }}>
+          <span style={{ fontWeight: 600, fontSize: 10, color: "#B0AFA8", textTransform: "uppercase", letterSpacing: 0.5 }}>Notes: </span>
+          {task.notes}
+        </div>
+      )}
+
+      {/* Timestamps */}
+      {(task.started_at || task.completed_at) && (
+        <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 10, color: "#B0AFA8" }}>
+          {task.started_at && <span>Started {new Date(task.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
+          {task.completed_at && <span>Done {new Date(task.completed_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
+          {task.started_at && task.completed_at && (
+            <span>{formatDuration(task.started_at, task.completed_at)}</span>
+          )}
+        </div>
+      )}
+
+      {/* Activity log */}
+      <ActivityLog activity={task.activity} />
     </div>
   );
 }
@@ -1134,6 +1294,7 @@ function DagView({
   results,
   onMarkDone,
   onRunAgent,
+  onAddNote,
   projectSummary,
   doneSubtaskIds,
   onToggleSubtask,
@@ -1143,8 +1304,9 @@ function DagView({
   energyFilter: Energy | "all";
   assigneeFilter: Assignee | "all";
   results: Record<string, AgentResult>;
-  onMarkDone: (id: string) => void;
+  onMarkDone: (id: string, notes?: string) => void;
   onRunAgent: (task: Task, force?: boolean) => void;
+  onAddNote: (id: string, note: string) => void;
   projectSummary: string;
   doneSubtaskIds: Set<string>;
   onToggleSubtask: (id: string) => void;
@@ -1240,6 +1402,7 @@ function DagView({
                 result={results[node.id]}
                 onMarkDone={onMarkDone}
                 onRunAgent={onRunAgent}
+                onAddNote={onAddNote}
                 projectSummary={projectSummary}
                 doneSubtaskIds={doneSubtaskIds}
                 onToggleSubtask={onToggleSubtask}
@@ -1277,6 +1440,7 @@ function DagView({
                     result={results[child.id]}
                     onMarkDone={onMarkDone}
                     onRunAgent={onRunAgent}
+                    onAddNote={onAddNote}
                     projectSummary={projectSummary}
                     doneSubtaskIds={doneSubtaskIds}
                     onToggleSubtask={onToggleSubtask}
@@ -1452,15 +1616,53 @@ export default function Home() {
   const currentNodes = plan ? computeUnlocked(plan.nodes, doneIds) : [];
 
   const markDone = useCallback(
-    (id: string) => {
+    (id: string, notes?: string) => {
       setDoneIds((prev) => {
         const next = new Set(prev);
         next.add(id);
         return next;
       });
+      // Update plan with completion timestamp, notes, and activity
+      setPlan((prev) => {
+        if (!prev) return prev;
+        const now = new Date().toISOString();
+        const updateTask = (t: Task): Task => {
+          if (t.id !== id) return t;
+          const activity: ActivityEvent[] = [...(t.activity || []), { type: "completed", at: now }];
+          if (notes) activity.splice(activity.length - 1, 0, { type: "note", text: notes, at: now });
+          return { ...t, completed_at: now, notes: notes || t.notes, activity };
+        };
+        return {
+          ...prev,
+          nodes: prev.nodes.map((n): DagNode =>
+            n.type === "task" ? updateTask(n) : { ...n, children: n.children.map(updateTask) }
+          ),
+        };
+      });
     },
     []
   );
+
+  const addNote = useCallback((taskId: string, note: string) => {
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const now = new Date().toISOString();
+      const updateTask = (t: Task): Task => {
+        if (t.id !== taskId) return t;
+        return {
+          ...t,
+          notes: note,
+          activity: [...(t.activity || []), { type: "note" as const, text: note, at: now }],
+        };
+      };
+      return {
+        ...prev,
+        nodes: prev.nodes.map((n): DagNode =>
+          n.type === "task" ? updateTask(n) : { ...n, children: n.children.map(updateTask) }
+        ),
+      };
+    });
+  }, []);
 
   const toggleSubtask = useCallback((subtaskId: string) => {
     setDoneSubtaskIds((prev) => {
@@ -1523,8 +1725,9 @@ export default function Home() {
       ) {
         launchedAgentTasks.current.add(task.id);
         // Stagger launches slightly to avoid hammering the API
+        const agentType = task.agent_type;
         setTimeout(() => {
-          execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee);
+          execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee, false, agentType);
         }, launchedAgentTasks.current.size * 500);
       }
     }
@@ -1532,7 +1735,23 @@ export default function Home() {
 
   const handleRunAgent = (task: Task, force?: boolean) => {
     launchedAgentTasks.current.add(task.id);
-    execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee, force);
+    // Track activity
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const now = new Date().toISOString();
+      const updateTask = (t: Task): Task => {
+        if (t.id !== task.id) return t;
+        const event: ActivityEvent = { type: "agent_started", agent: t.agent_type || "builtin", model: "", at: now };
+        return { ...t, started_at: t.started_at || now, activity: [...(t.activity || []), event] };
+      };
+      return {
+        ...prev,
+        nodes: prev.nodes.map((n): DagNode =>
+          n.type === "task" ? updateTask(n) : { ...n, children: n.children.map(updateTask) }
+        ),
+      };
+    });
+    execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee, force, task.agent_type);
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1691,7 +1910,8 @@ export default function Home() {
     }
   };
 
-  const agentCount = allTasks.filter((t) => t.assignee === "agent").length;
+  const claudeCodeCount = allTasks.filter((t) => t.agent_type === "claude-code").length;
+  const builtinAgentCount = allTasks.filter((t) => t.assignee === "agent" && t.agent_type !== "claude-code").length;
   const hybridCount = allTasks.filter((t) => t.assignee === "hybrid").length;
   const userCount = allTasks.filter((t) => t.assignee === "user").length;
 
@@ -1793,9 +2013,9 @@ export default function Home() {
             </h1>
             <p style={{ color: "#787774", fontSize: 16, marginBottom: 28, lineHeight: 1.6 }}>
               AI tools either do everything for you or leave you in a chat guessing
-              what to do next. LetsBegin coordinates — it builds a plan where agents
-              work in the background while you get guided through your part, one
-              thing at a time.
+              what to do next. LetsBegin coordinates — Claude plans, agents like
+              Claude Code handle the technical work, and you get guided through your
+              part with every step visible and traceable.
             </p>
 
             <div
@@ -1815,12 +2035,12 @@ export default function Home() {
                 {
                   num: "2",
                   title: "Get a dependency graph",
-                  desc: "AI compiles a real plan — not a to-do list. Tasks that can run in parallel do, and nothing blocks unnecessarily.",
+                  desc: "Claude builds a real plan — not a to-do list. It picks the right agent for each task and lets everything run in parallel.",
                 },
                 {
                   num: "3",
-                  title: "You and AI, in parallel",
-                  desc: "Agents auto-run their tasks while you focus on yours. One thing at a time, never overwhelmed.",
+                  title: "Visible, traceable work",
+                  desc: "Agents run in the background. Your tasks have notes, timestamps, and a full activity log — nothing gets lost.",
                 },
               ].map((s) => (
                 <div
@@ -1883,8 +2103,8 @@ export default function Home() {
                 </p>
                 <p style={{ margin: "0 0 10px" }}>
                   <strong>Unlike coding agents:</strong> LetsBegin handles the whole project — not
-                  just the code parts. It knows when a human needs to sign up for an account,
-                  make a decision, or review a draft.
+                  just the code parts. Claude Code handles the technical tasks. You handle what
+                  only you can do. Everything is visible and traceable.
                 </p>
                 <p style={{ margin: "0 0 10px" }}>
                   <strong>Unlike task managers:</strong> Tasks actually get done. Agents auto-execute
@@ -2011,7 +2231,7 @@ export default function Home() {
             </div>
             {attachments.length > 0 && (
               <div style={{ marginTop: 6, fontSize: 11, color: TEXT_LIGHT }}>
-                Images will be analyzed by Gemini to understand your project context.
+                Images will be analyzed to understand your project context.
               </div>
             )}
 
@@ -2508,6 +2728,7 @@ export default function Home() {
                       result={results[oneThingTask.id]}
                       onMarkDone={markDone}
                       onRunAgent={handleRunAgent}
+                      onAddNote={addNote}
                       projectSummary={plan?.summary || brief}
                       autoExpandSubtasks
                       doneSubtaskIds={doneSubtaskIds}
@@ -2720,10 +2941,17 @@ export default function Home() {
                   <p style={{ fontSize: 14, color: "#787774", lineHeight: 1.6, marginBottom: 14 }}>
                     {plan.summary}
                   </p>
-                  <div style={{ display: "flex", gap: 16, fontSize: 13, color: TEXT_LIGHT }}>
-                    <span>
-                      <strong style={{ color: PRIMARY }}>{agentCount}</strong> agent
-                    </span>
+                  <div style={{ display: "flex", gap: 16, fontSize: 13, color: TEXT_LIGHT, flexWrap: "wrap" }}>
+                    {claudeCodeCount > 0 && (
+                      <span>
+                        <strong style={{ color: "#C4841D" }}>{claudeCodeCount}</strong> Claude Code
+                      </span>
+                    )}
+                    {builtinAgentCount > 0 && (
+                      <span>
+                        <strong style={{ color: PRIMARY }}>{builtinAgentCount}</strong> agent
+                      </span>
+                    )}
                     <span>
                       <strong style={{ color: "#C4841D" }}>{hybridCount}</strong> hybrid
                     </span>
@@ -2798,6 +3026,7 @@ export default function Home() {
                   results={results}
                   onMarkDone={markDone}
                   onRunAgent={handleRunAgent}
+                  onAddNote={addNote}
                   projectSummary={plan?.summary || brief}
                   doneSubtaskIds={doneSubtaskIds}
                   onToggleSubtask={toggleSubtask}

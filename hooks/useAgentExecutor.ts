@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
+import type { AgentType } from "@/lib/dag";
 
 export type AgentStep =
   | { type: "thinking"; text: string }
@@ -12,8 +13,11 @@ export interface AgentResult {
   steps: AgentStep[];
   finalOutput: string;
   model: "claude-sonnet" | "gemini-flash";
+  agentType: AgentType;
   done: boolean;
   error?: string;
+  startedAt: string;
+  completedAt?: string;
 }
 
 interface ToolResultData {
@@ -32,7 +36,15 @@ export function useAgentExecutor() {
   const abortControllers = useRef<Map<string, AbortController>>(new Map());
 
   const execute = useCallback(
-    async (taskId: string, title: string, description: string, projectContext: string, assignee?: string, force?: boolean) => {
+    async (
+      taskId: string,
+      title: string,
+      description: string,
+      projectContext: string,
+      assignee?: string,
+      force?: boolean,
+      agentType?: AgentType,
+    ) => {
       // Don't re-run if already running (unless forced for regenerate)
       if (abortControllers.current.has(taskId)) {
         if (!force) return;
@@ -54,7 +66,9 @@ export function useAgentExecutor() {
         steps: [{ type: "thinking", text: "" }],
         finalOutput: "",
         model: "gemini-flash",
+        agentType: agentType || "builtin",
         done: false,
+        startedAt: new Date().toISOString(),
       };
       setResults((prev) => ({ ...prev, [taskId]: initial }));
 
@@ -62,14 +76,15 @@ export function useAgentExecutor() {
         const res = await fetch("/api/execute", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ taskId, title, description, projectContext, assignee }),
+          body: JSON.stringify({ taskId, title, description, projectContext, assignee, agentType }),
           signal: controller.signal,
         });
 
         const model = (res.headers.get("X-Agent-Model") as "claude-sonnet" | "gemini-flash") || "gemini-flash";
+        const resolvedAgentType = (res.headers.get("X-Agent-Type") as AgentType) || agentType || "builtin";
         setResults((prev) => ({
           ...prev,
-          [taskId]: { ...prev[taskId], model },
+          [taskId]: { ...prev[taskId], model, agentType: resolvedAgentType },
         }));
 
         const reader = res.body?.getReader();
@@ -166,7 +181,7 @@ export function useAgentExecutor() {
 
         setResults((prev) => ({
           ...prev,
-          [taskId]: { ...prev[taskId], done: true },
+          [taskId]: { ...prev[taskId], done: true, completedAt: new Date().toISOString() },
         }));
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
@@ -175,6 +190,7 @@ export function useAgentExecutor() {
             [taskId]: {
               ...prev[taskId],
               done: true,
+              completedAt: new Date().toISOString(),
               error: (err as Error).message,
             },
           }));

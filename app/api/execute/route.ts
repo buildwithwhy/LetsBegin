@@ -1,32 +1,9 @@
 import { streamText, tool, stepCountIs } from "ai";
-import { google } from "@ai-sdk/google";
 import { z } from "zod";
+import { selectModel, detectTaskType } from "@/lib/models";
+import type { AgentType } from "@/lib/dag";
 
 export const maxDuration = 60;
-
-// Task type detection — preserved for future model routing
-const CODING_KEYWORDS = [
-  "code", "build", "implement", "script", "function", "component", "api",
-  "endpoint", "database", "schema", "deploy", "configure", "install",
-  "setup", "debug", "fix", "refactor",
-];
-
-function detectTaskType(description: string): "coding" | "writing" {
-  const lower = description.toLowerCase();
-  return CODING_KEYWORDS.some((kw) => lower.includes(kw)) ? "coding" : "writing";
-}
-
-// Model selection — centralized so the orchestrator can override later
-function selectModel(taskType: "coding" | "writing") {
-  // Future: let the orchestrator (or user preferences) pick the best model
-  // e.g., anthropic("claude-sonnet-4-6") for coding, google for writing
-  // For now: Gemini handles everything
-  void taskType;
-  return {
-    model: google("gemini-3-flash-preview"),
-    label: "gemini-flash" as const,
-  };
-}
 
 const codingTools = {
   writeCode: tool({
@@ -69,10 +46,16 @@ const writingTools = {
 };
 
 export async function POST(req: Request) {
-  const { taskId, title, description, projectContext, assignee } = await req.json();
+  const { taskId, title, description, projectContext, assignee, agentType } = await req.json();
 
   const taskType = detectTaskType(description);
-  const { model, label } = selectModel(taskType);
+
+  // Route to the right model based on agent type and task type
+  const resolvedAgentType: AgentType = agentType || (taskType === "coding" ? "claude-code" : "builtin");
+  const purpose = resolvedAgentType === "claude-code" || taskType === "coding"
+    ? "execute-code"
+    : "execute-write";
+  const { model, label } = selectModel(purpose);
 
   const hybridNote = assignee === "hybrid"
     ? `\n\nIMPORTANT: This is a HYBRID task — you draft, then a human reviews and decides.
@@ -81,11 +64,15 @@ export async function POST(req: Request) {
 - Label your output clearly: "Here are 3 options for you to choose from:" or "Here's a draft for your review:"`
     : "";
 
+  const agentIdentity = resolvedAgentType === "claude-code"
+    ? "You are Claude Code, a powerful coding agent. You can reason deeply about code, plan implementations, and write production-quality code."
+    : "You are a helpful AI agent working on a project task.";
+
   const result = streamText({
     model,
     tools: taskType === "coding" ? codingTools : writingTools,
     stopWhen: stepCountIs(5),
-    prompt: `You are an AI agent working on a project task.
+    prompt: `${agentIdentity}
 
 Project context: ${projectContext || "No additional context"}
 
@@ -137,6 +124,7 @@ Complete this task using the available tools. Think through the approach, then u
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "X-Agent-Model": label,
+      "X-Agent-Type": resolvedAgentType,
       "X-Task-Id": taskId,
     },
   });

@@ -1,6 +1,6 @@
 import { generateObject } from "ai";
-import { google } from "@ai-sdk/google";
 import { z } from "zod";
+import { selectModel } from "@/lib/models";
 
 export const maxDuration = 30;
 
@@ -25,9 +25,12 @@ export type ClarifyQuestion = {
 export async function POST(req: Request) {
   const { brief } = await req.json();
 
+  // Gemini for fast/cheap question generation
+  const { model } = selectModel("clarify");
+
   try {
     const result = await generateObject({
-      model: google("gemini-3-flash-preview"),
+      model,
       schema: questionsSchema,
       prompt: `You are a project planning assistant. A user wants help with this project:
 

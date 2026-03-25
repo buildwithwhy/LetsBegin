@@ -1,7 +1,7 @@
 import { streamText, generateObject } from "ai";
-import { google } from "@ai-sdk/google";
 import { z } from "zod";
-import { type Plan, type Task, type DagNode, getAllTasks, computeUnlocked } from "./dag";
+import { type Plan, type DagNode, getAllTasks, computeUnlocked } from "./dag";
+import { selectModel } from "./models";
 
 // Schema WITHOUT subtasks — fast to generate
 const taskSchema = z.object({
@@ -13,6 +13,7 @@ const taskSchema = z.object({
   energy: z.enum(["high", "medium", "low"]),
   status: z.literal("pending"),
   depends_on: z.array(z.string()),
+  agent_type: z.enum(["builtin", "claude-code", "custom"]).optional(),
 });
 
 const parallelGroupSchema = z.object({
@@ -78,13 +79,15 @@ Think out loud about this brief. Make 4-6 short observations about:
 - What ACTUALLY blocks what — for each dependency, name the specific output that flows from one task to another. If you can't name it, they're independent.
 - Where can the human and AI work at the same time? Most agent and human tasks are independent — identify which ones truly aren't.
 - Which tasks should be done by an AI agent vs a human vs hybrid (agent drafts, human reviews)
+- For agent tasks: which ones need strong coding/reasoning (suited for Claude Code) vs simpler generation (suited for a built-in agent)
 - Any risks or gotchas
 
 Keep each observation to 1-2 sentences. Be practical and specific.`;
 
-  // Phase 1: Think out loud
+  // Phase 1: Think out loud — Claude for strong reasoning
+  const { model: thinkingModel } = selectModel("thinking");
   const thinkingResult = streamText({
-    model: google("gemini-3-flash-preview"),
+    model: thinkingModel,
     messages: [
       {
         role: "user",
@@ -100,11 +103,12 @@ Keep each observation to 1-2 sentences. Be practical and specific.`;
     yield { type: "thought", text: chunk };
   }
 
-  // Phase 2: Generate plan structure (no subtasks — fast)
+  // Phase 2: Generate plan structure (no subtasks — fast) — Claude for reasoning
   yield { type: "status", text: "Structuring your plan..." };
 
+  const { model: planModel } = selectModel("planning");
   const planResult = await generateObject({
-    model: google("gemini-3-flash-preview"),
+    model: planModel,
     schema: planSchema,
     prompt: `You are a project planning assistant. A user has given you this project brief:
 
@@ -123,6 +127,12 @@ Rules:
 - assignee is "agent" (AI can fully automate), "user" (human must do it), or "hybrid" (agent drafts, human reviews)
 - energy is "high" (significant effort), "medium" (moderate effort), or "low" (quick task)
 - Do NOT include subtasks — keep this lean
+
+AGENT TYPE ASSIGNMENT:
+For tasks with assignee "agent" or "hybrid", set agent_type:
+- "claude-code": Tasks that need real coding, implementation, debugging, complex reasoning, or working with code repositories. Claude Code can read files, write code, run commands, and think deeply.
+- "builtin": Simpler agent tasks — drafting content, researching, generating text, filling templates. These use a lightweight built-in agent.
+- Leave agent_type undefined for "user" tasks.
 
 CRITICAL — DEPENDENCY RULES:
 A dependency (depends_on) means: "this task LITERALLY CANNOT START without the OUTPUT of that task." Not "it would be nice to do first" — it means IMPOSSIBLE without it.
@@ -156,7 +166,7 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
   // Yield plan immediately so UI shows it fast
   yield { type: "plan", plan };
 
-  // Phase 3: Generate subtasks for user/hybrid tasks (runs after plan is shown)
+  // Phase 3: Generate subtasks for user/hybrid tasks — Gemini for fast generation
   const humanTasks = getAllTasks(plan.nodes).filter(
     (t) => t.assignee === "user" || t.assignee === "hybrid"
   );
@@ -169,8 +179,9 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
         .map((t) => `- id: "${t.id}", title: "${t.title}", assignee: "${t.assignee}", description: "${t.description}"`)
         .join("\n");
 
+      const { model: subtaskModel } = selectModel("subtasks");
       const subtasksResult = await generateObject({
-        model: google("gemini-3-flash-preview"),
+        model: subtaskModel,
         schema: subtasksSchema,
         prompt: `For the following tasks in a project plan, generate concrete step-by-step subtasks.
 
