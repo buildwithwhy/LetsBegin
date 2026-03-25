@@ -17,6 +17,7 @@ import { useAgentExecutor, type AgentResult, type AgentStep } from "@/hooks/useA
 import { useAuth } from "@/hooks/useAuth";
 import { usePlanStorage } from "@/hooks/usePlanStorage";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
+import { templates, type ProjectTemplate } from "@/lib/templates";
 
 const PRIMARY = "#6366A0";
 const BG = "#F7F6F3";
@@ -40,6 +41,7 @@ function Header({
   runningCount,
   userEmail,
   onSignOut,
+  onDashboard,
 }: {
   plan: Plan | null;
   doneCount: number;
@@ -48,6 +50,7 @@ function Header({
   runningCount: number;
   userEmail?: string;
   onSignOut?: () => void;
+  onDashboard?: () => void;
 }) {
   return (
     <header
@@ -64,7 +67,12 @@ function Header({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-        <span style={{ fontSize: 22, fontWeight: 700, color: PRIMARY }}>LetsBegin</span>
+        <span
+          style={{ fontSize: 22, fontWeight: 700, color: PRIMARY, cursor: onDashboard ? "pointer" : "default" }}
+          onClick={onDashboard}
+        >
+          LetsBegin
+        </span>
         {plan && (
           <span style={{ fontSize: 14, color: "#787774", fontWeight: 500 }}>
             {plan.project_title}
@@ -1566,7 +1574,7 @@ type ClarifyQuestion = {
   options?: string[];
 };
 
-type Step = "input" | "clarify" | "compiling" | "reveal";
+type Step = "dashboard" | "input" | "clarify" | "compiling" | "reveal";
 
 export default function Home() {
   const { user, loading: authLoading, signInWithEmail, signUpWithEmail, signOut, configured: authConfigured } = useAuth();
@@ -1577,7 +1585,9 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
   const [savedPlanId, setSavedPlanId] = useState<string | null>(null);
 
-  const [step, setStep] = useState<Step>("input");
+  const [step, setStep] = useState<Step>("dashboard");
+  const [savedPlans, setSavedPlans] = useState<{ id: string; brief: string; project_title: string; summary: string; nodes: DagNode[]; done_ids: string[]; done_subtask_ids: string[]; created_at: string; updated_at: string }[]>([]);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
   const [brief, setBrief] = useState("");
   const voiceInput = useVoiceInput(useCallback((text: string) => {
     setBrief((prev) => prev + (prev ? " " : "") + text);
@@ -1606,6 +1616,54 @@ export default function Home() {
   const [showBreakReminder, setShowBreakReminder] = useState(false);
 
   const { execute, results, running, runningCount } = useAgentExecutor();
+
+  // Load saved plans for dashboard
+  useEffect(() => {
+    if (user && step === "dashboard") {
+      setDashboardLoading(true);
+      loadPlans().then((plans) => {
+        setSavedPlans(plans);
+        setDashboardLoading(false);
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, step]);
+
+  const loadSavedPlan = useCallback((saved: typeof savedPlans[0]) => {
+    setBrief(saved.brief);
+    setPlan({
+      project_title: saved.project_title,
+      summary: saved.summary,
+      nodes: saved.nodes,
+    });
+    setDoneIds(new Set(saved.done_ids));
+    setDoneSubtaskIds(new Set(saved.done_subtask_ids));
+    setSavedPlanId(saved.id);
+    setStep("reveal");
+  }, []);
+
+  const startFromTemplate = useCallback((template: ProjectTemplate) => {
+    setBrief(template.brief);
+    if (template.justMeDefault) setJustMeMode(true);
+    setStep("input");
+  }, []);
+
+  const startNewProject = useCallback(() => {
+    setBrief("");
+    setPlan(null);
+    setDoneIds(new Set());
+    setDoneSubtaskIds(new Set());
+    setSavedPlanId(null);
+    setJustMeMode(false);
+    setCurrentEnergy(null);
+    setStreak(0);
+    setShowBreakReminder(false);
+    setStep("input");
+  }, []);
+
+  const goToDashboard = useCallback(() => {
+    setStep("dashboard");
+  }, []);
 
   // Elapsed timer for compiling phase
   useEffect(() => {
@@ -1978,9 +2036,140 @@ export default function Home() {
 
   return (
     <div style={{ minHeight: "100vh" }}>
-      <Header plan={plan} doneCount={doneCount} total={total} running={running} runningCount={runningCount} userEmail={user?.email} onSignOut={signOut} />
+      <Header plan={plan} doneCount={doneCount} total={total} running={running} runningCount={runningCount} userEmail={user?.email} onSignOut={signOut} onDashboard={step !== "dashboard" ? goToDashboard : undefined} />
 
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "40px 20px" }}>
+        {/* ─── DASHBOARD ─── */}
+        {(user || !authConfigured) && step === "dashboard" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+              <h1 style={{ fontSize: 28, fontWeight: 700, color: TEXT, margin: 0 }}>
+                Your projects
+              </h1>
+              <button
+                onClick={startNewProject}
+                style={{
+                  padding: "10px 20px",
+                  border: "none",
+                  borderRadius: 10,
+                  background: PRIMARY,
+                  color: "#fff",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                + New project
+              </button>
+            </div>
+
+            {/* Active projects */}
+            {dashboardLoading ? (
+              <div style={{ padding: 40, textAlign: "center", color: TEXT_LIGHT }}>Loading projects...</div>
+            ) : savedPlans.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 32 }}>
+                {savedPlans.map((saved) => {
+                  const tasks = getAllTasks(saved.nodes);
+                  const done = saved.done_ids?.length || 0;
+                  const totalTasks = tasks.length;
+                  const pct = totalTasks > 0 ? Math.round((done / totalTasks) * 100) : 0;
+                  const isComplete = done === totalTasks && totalTasks > 0;
+
+                  return (
+                    <div
+                      key={saved.id}
+                      onClick={() => loadSavedPlan(saved)}
+                      style={{
+                        background: SURFACE,
+                        borderRadius: 12,
+                        padding: "16px 20px",
+                        border: `1px solid ${BORDER}`,
+                        cursor: "pointer",
+                        transition: "border-color 0.15s",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 16,
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.borderColor = PRIMARY)}
+                      onMouseLeave={(e) => (e.currentTarget.style.borderColor = BORDER)}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, color: isComplete ? "#2DA44E" : TEXT }}>
+                          {isComplete && "\u2713 "}{saved.project_title || "Untitled project"}
+                        </div>
+                        <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
+                          {saved.summary?.slice(0, 100) || saved.brief?.slice(0, 100)}
+                          {(saved.summary?.length || saved.brief?.length || 0) > 100 ? "..." : ""}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#B0AFA8", marginTop: 4 }}>
+                          Updated {new Date(saved.updated_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <div style={{ fontSize: 20, fontWeight: 700, color: isComplete ? "#2DA44E" : PRIMARY }}>
+                          {pct}%
+                        </div>
+                        <div style={{ fontSize: 11, color: TEXT_LIGHT }}>
+                          {done}/{totalTasks} tasks
+                        </div>
+                        {/* Mini progress bar */}
+                        <div style={{ width: 60, height: 4, background: BORDER, borderRadius: 2, marginTop: 4, overflow: "hidden" }}>
+                          <div style={{ width: `${pct}%`, height: "100%", background: isComplete ? "#2DA44E" : PRIMARY, borderRadius: 2 }} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ padding: "20px 0", color: TEXT_LIGHT, fontSize: 14, marginBottom: 24 }}>
+                No projects yet. Start one from scratch or pick a template below.
+              </div>
+            )}
+
+            {/* Templates */}
+            <div style={{ marginBottom: 16 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 700, color: TEXT, marginBottom: 4 }}>
+                Quick start
+              </h2>
+              <p style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 16 }}>
+                Pick a template to get going fast. You can customize the brief before building.
+              </p>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                gap: 10,
+              }}>
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => startFromTemplate(t)}
+                    style={{
+                      background: SURFACE,
+                      borderRadius: 10,
+                      padding: "14px 14px",
+                      border: `1px solid ${BORDER}`,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontFamily: "'DM Sans', sans-serif",
+                      transition: "border-color 0.15s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = PRIMARY)}
+                    onMouseLeave={(e) => (e.currentTarget.style.borderColor = BORDER)}
+                  >
+                    <div style={{ fontSize: 20, marginBottom: 6 }}>{t.icon}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: TEXT }}>{t.title}</div>
+                    <div style={{ fontSize: 11, color: TEXT_LIGHT, marginTop: 2, textTransform: "capitalize" }}>
+                      {t.category}{t.justMeDefault ? " \u00B7 just you" : ""}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ─── AUTH ─── */}
         {authConfigured && !authLoading && !user && (
           <div style={{ maxWidth: 380, margin: "60px auto", textAlign: "center" }}>

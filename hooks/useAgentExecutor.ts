@@ -21,13 +21,35 @@ export interface AgentResult {
 }
 
 interface ToolResultData {
-  draft?: string;
+  // Code tools
   code?: string;
   language?: string;
   filename?: string;
+  explanation?: string;
+  // Writing tools
+  draft?: string;
+  body?: string;
+  subject?: string;
+  to?: string;
+  content?: string;
+  follow_up_notes?: string;
+  // Research tools
   findings?: string;
+  topic?: string;
+  comparison_table?: { item: string; pros: string[]; cons: string[]; verdict: string }[];
+  recommendations?: string[];
+  // Planning tools
   approach?: string;
   steps?: string[];
+  // Outline tools
+  title?: string;
+  sections?: { heading: string; points: string[]; notes?: string }[];
+  // List tools
+  list_type?: string;
+  items?: { name: string; description: string; details?: string; action_needed?: string }[];
+  total_count?: number;
+  // Config tools
+  format?: string;
 }
 
 export function useAgentExecutor() {
@@ -138,13 +160,9 @@ export function useAgentExecutor() {
                   if (!r) return prev;
                   const steps = [...r.steps];
                   const result = event.result as ToolResultData;
-                  if (result.draft) {
-                    steps.push({
-                      type: "output",
-                      content: result.draft,
-                      outputType: "writing",
-                    });
-                  } else if (result.code) {
+
+                  // Code output
+                  if (result.code) {
                     steps.push({
                       type: "output",
                       content: result.code,
@@ -152,17 +170,64 @@ export function useAgentExecutor() {
                       language: result.language,
                       filename: result.filename,
                     });
+                  // Email draft
+                  } else if (result.body && result.subject) {
+                    const emailContent = `**To:** ${result.to || "Recipient"}\n**Subject:** ${result.subject}\n\n${result.body}${result.follow_up_notes ? `\n\n---\n*Follow-up notes: ${result.follow_up_notes}*` : ""}`;
+                    steps.push({ type: "output", content: emailContent, outputType: "writing" });
+                  // Content draft
+                  } else if (result.draft) {
+                    steps.push({ type: "output", content: result.draft, outputType: "writing" });
+                  // Research with comparison table
+                  } else if (result.findings && result.comparison_table) {
+                    let content = result.findings + "\n\n";
+                    content += "| Item | Pros | Cons | Verdict |\n|------|------|------|---------|\n";
+                    for (const row of result.comparison_table) {
+                      content += `| ${row.item} | ${row.pros.join(", ")} | ${row.cons.join(", ")} | ${row.verdict} |\n`;
+                    }
+                    if (result.recommendations) {
+                      content += "\n**Recommendations:**\n" + result.recommendations.map((r: string) => `- ${r}`).join("\n");
+                    }
+                    steps.push({ type: "output", content, outputType: "writing" });
+                  // Plain research
                   } else if (result.findings) {
-                    steps.push({
-                      type: "output",
-                      content: result.findings,
-                      outputType: "writing",
-                    });
+                    steps.push({ type: "output", content: result.findings, outputType: "writing" });
+                  // Outline
+                  } else if (result.sections) {
+                    let content = result.title ? `# ${result.title}\n\n` : "";
+                    for (const section of result.sections) {
+                      content += `## ${section.heading}\n`;
+                      for (const point of section.points) {
+                        content += `- ${point}\n`;
+                      }
+                      if (section.notes) content += `\n*${section.notes}*\n`;
+                      content += "\n";
+                    }
+                    steps.push({ type: "output", content, outputType: "writing" });
+                  // Generated list
+                  } else if (result.items && result.list_type) {
+                    let content = `**${result.list_type}** (${result.total_count || result.items.length} items)\n\n`;
+                    for (const item of result.items) {
+                      content += `### ${item.name}\n${item.description}`;
+                      if (item.details) content += `\n${item.details}`;
+                      if (item.action_needed) content += `\n*Action: ${item.action_needed}*`;
+                      content += "\n\n";
+                    }
+                    steps.push({ type: "output", content, outputType: "writing" });
+                  // Implementation plan
                   } else if (result.approach) {
                     steps.push({
                       type: "output",
                       content: `**Approach:** ${result.approach}\n\n**Steps:**\n${(result.steps || []).map((s: string) => `- ${s}`).join("\n")}`,
                       outputType: "writing",
+                    });
+                  // Config file
+                  } else if (result.content && result.format) {
+                    steps.push({
+                      type: "output",
+                      content: result.content,
+                      outputType: "code",
+                      language: result.format,
+                      filename: result.filename,
                     });
                   }
                   return { ...prev, [taskId]: { ...r, steps } };

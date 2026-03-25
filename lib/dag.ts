@@ -5,6 +5,16 @@ export type Status = "locked" | "pending" | "done" | "skipped";
 // What kind of agent handles this task
 export type AgentType = "builtin" | "claude-code" | "custom";
 
+// What real-world action this task represents
+export type ActionType = "draft" | "post" | "send" | "deploy" | "research" | "review" | "build" | "decide";
+
+// Recurring task configuration
+export interface Recurrence {
+  frequency: "daily" | "weekly" | "biweekly" | "monthly";
+  next_due?: string; // ISO date of next occurrence
+  completed_count?: number; // how many times this has been completed
+}
+
 export interface Subtask {
   id: string;
   title: string;
@@ -33,8 +43,11 @@ export interface Task {
   status: Status;
   depends_on: string[];
   subtasks?: Subtask[];
-  // New fields for rearchitecture
+  // Agent and action configuration
   agent_type?: AgentType;  // what kind of agent runs this (for agent/hybrid tasks)
+  action_type?: ActionType;  // what real-world action this represents
+  recurrence?: Recurrence;  // if this task repeats on a schedule
+  // Traceability
   activity?: ActivityEvent[];  // traceable log of what happened
   notes?: string;  // human-written notes on this task
   started_at?: string;  // when this task was first acted on

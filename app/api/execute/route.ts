@@ -5,22 +5,36 @@ import type { AgentType } from "@/lib/dag";
 
 export const maxDuration = 60;
 
+// Rich agent tools — real capabilities, not just demos
+
 const codingTools = {
   writeCode: tool({
-    description: "Write code to a file",
+    description: "Write code to a file. Use this for any code generation — components, scripts, configs, etc.",
     inputSchema: z.object({
-      language: z.string(),
-      filename: z.string(),
-      code: z.string(),
-      explanation: z.string(),
+      language: z.string().describe("Programming language"),
+      filename: z.string().describe("Full filename with extension"),
+      code: z.string().describe("Complete file contents"),
+      explanation: z.string().describe("Brief explanation of what this code does"),
     }),
     execute: async (input) => input,
   }),
   planImplementation: tool({
-    description: "Plan an implementation approach",
+    description: "Plan an implementation approach before writing code",
     inputSchema: z.object({
-      approach: z.string(),
-      steps: z.array(z.string()),
+      approach: z.string().describe("High-level approach"),
+      steps: z.array(z.string()).describe("Ordered implementation steps"),
+      files_to_create: z.array(z.string()).optional().describe("Files that will be created"),
+      dependencies: z.array(z.string()).optional().describe("Required packages/dependencies"),
+    }),
+    execute: async (input) => input,
+  }),
+  generateConfig: tool({
+    description: "Generate configuration files (package.json, .env, CI configs, etc.)",
+    inputSchema: z.object({
+      filename: z.string(),
+      format: z.string().describe("json, yaml, toml, env, etc."),
+      content: z.string().describe("Complete file contents"),
+      explanation: z.string(),
     }),
     execute: async (input) => input,
   }),
@@ -28,18 +42,64 @@ const codingTools = {
 
 const writingTools = {
   draftContent: tool({
-    description: "Draft written content",
+    description: "Draft written content — blog posts, descriptions, social media posts, etc.",
     inputSchema: z.object({
-      content_type: z.string(),
-      draft: z.string(),
-      notes: z.string().optional(),
+      content_type: z.string().describe("What kind of content: blog post, social post, email, description, etc."),
+      draft: z.string().describe("The full draft"),
+      notes: z.string().optional().describe("Notes about tone, audience, or revisions"),
     }),
     execute: async (input) => input,
   }),
-  researchContext: tool({
-    description: "Research and gather context",
+  draftEmail: tool({
+    description: "Draft an email — outreach, follow-up, announcement, etc.",
     inputSchema: z.object({
-      findings: z.string(),
+      to: z.string().describe("Who this email is for (role/person description, not actual address)"),
+      subject: z.string(),
+      body: z.string(),
+      tone: z.string().optional().describe("Tone: professional, casual, warm, etc."),
+      follow_up_notes: z.string().optional().describe("Notes for follow-up timing and approach"),
+    }),
+    execute: async (input) => input,
+  }),
+  researchAndCompare: tool({
+    description: "Research a topic and present structured findings, comparisons, or analysis",
+    inputSchema: z.object({
+      topic: z.string(),
+      findings: z.string().describe("Detailed research findings"),
+      comparison_table: z.array(z.object({
+        item: z.string(),
+        pros: z.array(z.string()),
+        cons: z.array(z.string()),
+        verdict: z.string(),
+      })).optional().describe("Structured comparison if comparing things"),
+      recommendations: z.array(z.string()).optional(),
+    }),
+    execute: async (input) => input,
+  }),
+  createOutline: tool({
+    description: "Create a structured outline for content, presentations, or plans",
+    inputSchema: z.object({
+      title: z.string(),
+      sections: z.array(z.object({
+        heading: z.string(),
+        points: z.array(z.string()),
+        notes: z.string().optional(),
+      })),
+      total_estimated_length: z.string().optional(),
+    }),
+    execute: async (input) => input,
+  }),
+  generateList: tool({
+    description: "Generate a researched list — businesses to contact, tools to evaluate, ideas to explore, etc.",
+    inputSchema: z.object({
+      list_type: z.string().describe("What kind of list"),
+      items: z.array(z.object({
+        name: z.string(),
+        description: z.string(),
+        details: z.string().optional(),
+        action_needed: z.string().optional(),
+      })),
+      total_count: z.number(),
     }),
     execute: async (input) => input,
   }),
@@ -65,13 +125,13 @@ export async function POST(req: Request) {
     : "";
 
   const agentIdentity = resolvedAgentType === "claude-code"
-    ? "You are Claude Code, a powerful coding agent. You can reason deeply about code, plan implementations, and write production-quality code."
-    : "You are a helpful AI agent working on a project task.";
+    ? "You are Claude Code, a powerful coding agent. You can reason deeply about code, plan implementations, and write production-quality code. Use the tools available to produce real, complete outputs — not placeholders."
+    : "You are a helpful AI agent working on a project task. Use the tools available to produce thorough, actionable outputs. When drafting emails, create real personalized drafts. When researching, be specific and detailed. When creating lists, make them actionable.";
 
   const result = streamText({
     model,
     tools: taskType === "coding" ? codingTools : writingTools,
-    stopWhen: stepCountIs(5),
+    stopWhen: stepCountIs(8),
     prompt: `${agentIdentity}
 
 Project context: ${projectContext || "No additional context"}
@@ -80,7 +140,7 @@ Your current task:
 Title: ${title}
 Description: ${description}${hybridNote}
 
-Complete this task using the available tools. Think through the approach, then use the appropriate tool(s) to produce your output. Be thorough but concise.`,
+Complete this task using the available tools. Think through the approach, then use the appropriate tool(s) to produce your output. Be thorough but concise. Produce REAL, COMPLETE outputs — not summaries or placeholders.`,
   });
 
   const encoder = new TextEncoder();
