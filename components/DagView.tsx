@@ -14,7 +14,7 @@ import type { ExecutionMode, PriorResult } from "@/lib/styles";
 import type { DagNode, Task, Energy, Assignee } from "@/lib/dag";
 import { getAllTasks } from "@/lib/dag";
 import type { AgentResult } from "@/hooks/useAgentExecutor";
-import TaskCard from "@/components/TaskCard";
+import { TaskCard } from "@/components/TaskCard";
 
 function assigneeLabel(a: string) {
   return a === "agent" ? "\u26A1 Agent" : a === "user" ? "\uD83D\uDC64 User" : "\uD83E\uDD1D Hybrid";
