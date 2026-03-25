@@ -1900,6 +1900,8 @@ export default function Home() {
                       executionMode={executionMode}
                       userTools={userTools}
                       onEditTask={editTask}
+                      doneIds={doneIds}
+                      currentNodes={currentNodes}
                     />
 
                     {/* "I'm stuck" button — opens chat with a gentler first message */}
@@ -2353,6 +2355,8 @@ export default function Home() {
                   executionMode={executionMode}
                   userTools={userTools}
                   onEditTask={editTask}
+                  doneIds={doneIds}
+                  currentNodes={currentNodes}
                 />
               </div>
             )}

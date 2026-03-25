@@ -1,19 +1,120 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { PRIMARY, BORDER, TEXT_LIGHT, SURFACE, TEXT } from "@/lib/styles";
 import type { PriorResult } from "@/lib/styles";
-import type { Task, Subtask } from "@/lib/dag";
+import type { Task, Subtask, DagNode } from "@/lib/dag";
+import { getAllTasks } from "@/lib/dag";
 import { SimpleMarkdown } from "@/components/SimpleMarkdown";
+
+const QUICK_PROMPTS = [
+  "Walk me through this step by step",
+  "What should I do first?",
+  "I'm stuck, help me break this down",
+];
+
+function buildSystemContext({
+  task,
+  projectSummary,
+  priorResults,
+  allTasks,
+  doneIds,
+  currentNodes,
+}: {
+  task: Task;
+  projectSummary: string;
+  priorResults: PriorResult[];
+  allTasks?: Task[];
+  doneIds?: Set<string>;
+  currentNodes?: DagNode[];
+}): string {
+  const parts: string[] = [];
+
+  // Core persona
+  parts.push(
+    `You are helping a user complete a specific task in their project. They may have ADHD and find it helpful to have tasks broken down step-by-step. Be encouraging, specific, and action-oriented. Don't overwhelm with information — focus on what they need to do RIGHT NOW.`
+  );
+
+  parts.push(`\nHere's the full context:`);
+
+  // Project summary
+  if (projectSummary) {
+    parts.push(`\n## Project\n${projectSummary}`);
+  }
+
+  // What's been done so far
+  if (priorResults && priorResults.length > 0) {
+    parts.push(`\n## What's been done so far`);
+    for (const r of priorResults) {
+      const truncated = r.output ? r.output.slice(0, 200) + (r.output.length > 200 ? "..." : "") : "(no output)";
+      parts.push(`- "${r.title}" (${r.assignee}): ${truncated}`);
+    }
+  }
+
+  // Current task details
+  parts.push(`\n## Current task`);
+  parts.push(`Title: ${task.title}`);
+  parts.push(`Description: ${task.description}`);
+  if (task.assignee) parts.push(`Assignee: ${task.assignee}`);
+
+  if (task.subtasks && task.subtasks.length > 0) {
+    parts.push(`\nSubtasks:`);
+    for (const st of task.subtasks) {
+      parts.push(`- [${st.assignee}] ${st.title}`);
+    }
+  }
+
+  if (task.notes) {
+    parts.push(`\nUser's notes on this task: ${task.notes}`);
+  }
+
+  // What tasks are pending/next
+  if (allTasks && doneIds) {
+    const pendingTasks = allTasks.filter(
+      (t) => t.id !== task.id && !doneIds.has(t.id) && t.status !== "locked"
+    );
+    if (pendingTasks.length > 0) {
+      parts.push(`\n## Other tasks currently available`);
+      for (const t of pendingTasks.slice(0, 5)) {
+        parts.push(`- ${t.title} (${t.assignee})`);
+      }
+    }
+  }
+
+  // What this task unblocks (downstream dependents)
+  if (allTasks) {
+    const downstream = allTasks.filter(
+      (t) => t.depends_on && t.depends_on.includes(task.id)
+    );
+    if (downstream.length > 0) {
+      parts.push(`\n## What completing this task unblocks`);
+      for (const t of downstream) {
+        parts.push(`- "${t.title}" — ${t.description.slice(0, 100)}`);
+      }
+    }
+  }
+
+  parts.push(
+    `\nHelp them get through this task. If they're stuck, break it down further. If they need motivation, remind them why this matters and what it unblocks. Keep responses concise — use numbered steps when walking through a process.`
+  );
+
+  return parts.join("\n");
+}
 
 export function TaskChat({
   task,
   projectSummary,
   priorResults,
+  allTasks,
+  doneIds,
+  currentNodes,
 }: {
   task: Task;
   projectSummary: string;
   priorResults: PriorResult[];
+  allTasks?: Task[];
+  doneIds?: Set<string>;
+  currentNodes?: DagNode[];
 }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
@@ -25,9 +126,22 @@ export function TaskChat({
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const send = async () => {
-    if (!input.trim() || streaming) return;
-    const userMsg = { role: "user" as const, content: input.trim() };
+  const systemContext = useMemo(
+    () =>
+      buildSystemContext({
+        task,
+        projectSummary,
+        priorResults,
+        allTasks,
+        doneIds,
+        currentNodes,
+      }),
+    [task, projectSummary, priorResults, allTasks, doneIds, currentNodes]
+  );
+
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || streaming) return;
+    const userMsg = { role: "user" as const, content: text.trim() };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput("");
@@ -41,12 +155,8 @@ export function TaskChat({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          taskTitle: task.title,
-          taskDescription: task.description,
-          projectSummary,
+          systemContext,
           messages: newMessages,
-          priorResults,
-          subtasks: task.subtasks?.map((st) => ({ title: st.title, assignee: st.assignee })),
         }),
       });
 
@@ -84,6 +194,10 @@ export function TaskChat({
     } finally {
       setStreaming(false);
     }
+  };
+
+  const send = async () => {
+    await sendMessage(input);
   };
 
   if (!open) {
@@ -154,8 +268,41 @@ export function TaskChat({
         }}
       >
         {messages.length === 0 && (
-          <div style={{ fontSize: 12, color: TEXT_LIGHT, textAlign: "center", padding: 12 }}>
-            Ask anything about this task — how to start, what it means, step-by-step help.
+          <div style={{ padding: 8 }}>
+            <div style={{ fontSize: 12, color: TEXT_LIGHT, textAlign: "center", marginBottom: 10 }}>
+              Ask anything about this task, or try one of these:
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {QUICK_PROMPTS.map((prompt) => (
+                <button
+                  key={prompt}
+                  onClick={() => sendMessage(prompt)}
+                  disabled={streaming}
+                  style={{
+                    padding: "7px 12px",
+                    border: `1px solid ${BORDER}`,
+                    borderRadius: 8,
+                    background: SURFACE,
+                    color: TEXT,
+                    fontSize: 12,
+                    cursor: streaming ? "not-allowed" : "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                    textAlign: "left",
+                    transition: "background 0.15s, border-color 0.15s",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.target as HTMLButtonElement).style.background = "#F0EFEB";
+                    (e.target as HTMLButtonElement).style.borderColor = PRIMARY;
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.target as HTMLButtonElement).style.background = SURFACE;
+                    (e.target as HTMLButtonElement).style.borderColor = BORDER;
+                  }}
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {messages.map((m, i) => (

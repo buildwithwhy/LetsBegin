@@ -4,34 +4,36 @@ import { selectModel } from "@/lib/models";
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
-  const { taskTitle, taskDescription, projectSummary, messages, priorResults, subtasks } = await req.json();
+  const { taskTitle, taskDescription, projectSummary, messages, priorResults, subtasks, systemContext } = await req.json();
 
-  // Build context from what agents have already done
-  let priorContext = "";
-  if (priorResults && priorResults.length > 0) {
-    priorContext = "\n\nHere is what has already been completed in this project:\n";
-    for (const r of priorResults) {
-      priorContext += `\n--- Completed: "${r.title}" (done by: ${r.assignee}) ---\n`;
-      if (r.output) {
-        priorContext += r.output.slice(0, 1500) + "\n";
+  // If a rich systemContext was provided by the client, use it directly.
+  // Otherwise fall back to the legacy context-building approach.
+  let systemPrompt: string;
+
+  if (systemContext) {
+    systemPrompt = systemContext;
+  } else {
+    // Build context from what agents have already done (legacy path)
+    let priorContext = "";
+    if (priorResults && priorResults.length > 0) {
+      priorContext = "\n\nHere is what has already been completed in this project:\n";
+      for (const r of priorResults) {
+        priorContext += `\n--- Completed: "${r.title}" (done by: ${r.assignee}) ---\n`;
+        if (r.output) {
+          priorContext += r.output.slice(0, 1500) + "\n";
+        }
       }
     }
-  }
 
-  let subtaskContext = "";
-  if (subtasks && subtasks.length > 0) {
-    subtaskContext = "\n\nThis task has these subtasks:\n";
-    for (const st of subtasks) {
-      subtaskContext += `- [${st.assignee}] ${st.title}\n`;
+    let subtaskContext = "";
+    if (subtasks && subtasks.length > 0) {
+      subtaskContext = "\n\nThis task has these subtasks:\n";
+      for (const st of subtasks) {
+        subtaskContext += `- [${st.assignee}] ${st.title}\n`;
+      }
     }
-  }
 
-  // Claude for chat — better context handling and reasoning
-  const { model } = selectModel("chat");
-
-  const result = streamText({
-    model,
-    system: `You are a helpful assistant guiding a user through a specific task in their project.
+    systemPrompt = `You are a helpful assistant guiding a user through a specific task in their project.
 
 Project context: ${projectSummary}
 ${priorContext}
@@ -47,7 +49,15 @@ Guidelines:
 - Reference specific details from prior task results (e.g., "The agent used X tool to create Y — you can find it at Z")
 - If a prior step produced something the user needs, tell them exactly where it is and what to do with it
 - If the user seems overwhelmed, break things into even smaller pieces
-- Be warm and supportive, especially when tasks feel intimidating`,
+- Be warm and supportive, especially when tasks feel intimidating`;
+  }
+
+  // Claude for chat — better context handling and reasoning
+  const { model } = selectModel("chat");
+
+  const result = streamText({
+    model,
+    system: systemPrompt,
     messages: messages.map((m: { role: string; content: string }) => ({
       role: m.role as "user" | "assistant",
       content: m.content,

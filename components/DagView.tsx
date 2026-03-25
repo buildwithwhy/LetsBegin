@@ -77,6 +77,8 @@ export function DagView({
   executionMode = "api",
   userTools,
   onEditTask,
+  doneIds,
+  currentNodes,
 }: {
   nodes: DagNode[];
   energyFilter: Energy | "all";
@@ -92,6 +94,8 @@ export function DagView({
   executionMode?: ExecutionMode;
   userTools?: UserToolConfig;
   onEditTask?: (id: string, updates: { title?: string; description?: string; assignee?: Assignee; agent_type?: AgentType }) => void;
+  doneIds?: Set<string>;
+  currentNodes?: DagNode[];
 }) {
   const [view, setView] = useState<"steps" | "graph">("steps");
   const [completedExpanded, setCompletedExpanded] = useState(false);
@@ -192,6 +196,8 @@ export function DagView({
                 executionMode={executionMode}
                 userTools={userTools}
                 onEditTask={onEditTask}
+                doneIds={doneIds}
+                currentNodes={currentNodes}
               />
             );
           }
@@ -232,6 +238,8 @@ export function DagView({
                     allTasksList={allTasks}
                     executionMode={executionMode}
                     userTools={userTools}
+                    doneIds={doneIds}
+                    currentNodes={currentNodes}
                   />
                 ))}
               </div>

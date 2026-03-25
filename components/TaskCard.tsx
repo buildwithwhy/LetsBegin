@@ -75,6 +75,8 @@ export function TaskCard({
   executionMode = "api",
   userTools,
   onEditTask,
+  doneIds,
+  currentNodes,
 }: {
   task: Task;
   result?: AgentResult;
@@ -90,6 +92,8 @@ export function TaskCard({
   executionMode?: ExecutionMode;
   userTools?: UserToolConfig;
   onEditTask?: (id: string, updates: { title?: string; description?: string; assignee?: Assignee; agent_type?: AgentType }) => void;
+  doneIds?: Set<string>;
+  currentNodes?: DagNode[];
 }) {
   const isLocked = task.status === "locked";
   const isDone = task.status === "done";
@@ -432,7 +436,7 @@ export function TaskCard({
       )}
 
       {isPending && (task.assignee === "user" || task.assignee === "hybrid") && (
-        <TaskChat task={task} projectSummary={projectSummary} priorResults={priorResults} />
+        <TaskChat task={task} projectSummary={projectSummary} priorResults={priorResults} allTasks={allTasksList} doneIds={doneIds} currentNodes={currentNodes} />
       )}
 
       {/* ─── Hybrid two-phase handoff ─── */}
