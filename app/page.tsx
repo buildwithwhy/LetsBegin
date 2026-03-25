@@ -49,6 +49,7 @@ export default function Home() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [clarifyLoading, setClarifyLoading] = useState(false);
   const [clarifyError, setClarifyError] = useState("");
+  const [compileError, setCompileError] = useState("");
   const [questionIndex, setQuestionIndex] = useState(0);
   const [revealMode, setRevealMode] = useState<"onething" | "project">("onething");
   const [thinkingText, setThinkingText] = useState("");
@@ -60,14 +61,30 @@ export default function Home() {
   const [energyFilter, setEnergyFilter] = useState<Energy | "all">("all");
   const [assigneeFilter, setAssigneeFilter] = useState<Assignee | "all">("all");
   const [doneSubtaskIds, setDoneSubtaskIds] = useState<Set<string>>(new Set());
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>("api");
-  const [userTools, setUserTools] = useState<UserToolConfig>({ available: [] });
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("letsbegin-execution-mode");
+      if (saved === "api" || saved === "byo") return saved;
+    }
+    return "api";
+  });
+  const [userTools, setUserTools] = useState<UserToolConfig>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("letsbegin-user-tools");
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    return { available: [] };
+  });
   const [justMeMode, setJustMeMode] = useState(false);
   const [currentEnergy, setCurrentEnergy] = useState<Energy | null>(null);
   const [streak, setStreak] = useState(0);
   const [lastCompletedAt, setLastCompletedAt] = useState<number | null>(null);
   const [showEncouragement, setShowEncouragement] = useState<string | null>(null);
   const [showBreakReminder, setShowBreakReminder] = useState(false);
+  const [undoToast, setUndoToast] = useState<{ id: string; title: string } | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { execute, results, running, runningCount } = useAgentExecutor();
 
@@ -82,6 +99,20 @@ export default function Home() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, step]);
+
+  // Persist userTools to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("letsbegin-user-tools", JSON.stringify(userTools));
+    }
+  }, [userTools]);
+
+  // Persist executionMode to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("letsbegin-execution-mode", executionMode);
+    }
+  }, [executionMode]);
 
   const loadSavedPlan = useCallback((saved: typeof savedPlans[0]) => {
     setBrief(saved.brief);
@@ -192,10 +223,38 @@ export default function Home() {
       // Pick an encouragement message
       setShowEncouragement(encouragements[Math.floor(Math.random() * encouragements.length)]);
       setTimeout(() => setShowEncouragement(null), 3000);
+      // Show undo toast
+      const task = allTasks.find((t) => t.id === id);
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      setUndoToast({ id, title: task?.title || id });
+      undoTimerRef.current = setTimeout(() => setUndoToast(null), 5000);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+    [allTasks]
   );
+
+  const unmarkDone = useCallback((id: string) => {
+    setDoneIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const updateTask = (t: Task): Task => {
+        if (t.id !== id) return t;
+        return { ...t, completed_at: undefined };
+      };
+      return {
+        ...prev,
+        nodes: prev.nodes.map((n): DagNode =>
+          n.type === "task" ? updateTask(n) : { ...n, children: n.children.map(updateTask) }
+        ),
+      };
+    });
+    setUndoToast(null);
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+  }, []);
 
   const addNote = useCallback((taskId: string, note: string) => {
     setPlan((prev) => {
@@ -402,6 +461,7 @@ export default function Home() {
     setThinkingText("");
     setCompileStatus("Thinking through your brief...");
     setCompileStartTime(Date.now());
+    setCompileError("");
     setElapsed(0);
 
     const enrichedBrief = buildEnrichedBrief();
@@ -414,70 +474,83 @@ export default function Home() {
       });
 
       const reader = res.body?.getReader();
-      if (!reader) return;
+      if (!reader) {
+        setCompileError("Failed to connect to the server. Please try again.");
+        setCompileStartTime(null);
+        setStep("input");
+        return;
+      }
 
       const decoder = new TextDecoder();
       let buffer = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const event = JSON.parse(line);
-            if (event.type === "thought") {
-              setThinkingText((prev) => prev + event.text);
-            } else if (event.type === "status") {
-              setCompileStatus(event.text);
-            } else if (event.type === "plan") {
-              setCompileStartTime(null);
-              const receivedPlan = justMeMode ? convertToJustMe(event.plan) : event.plan;
-              setPlan(receivedPlan);
-              setStep("reveal");
-            } else if (event.type === "subtasks") {
-              // Merge subtasks into the existing plan
-              setPlan((prev) => {
-                if (!prev) return prev;
-                const subtaskMap = new Map<string, string[]>();
-                for (const t of event.tasks) {
-                  subtaskMap.set(t.id, t.subtasks);
-                }
-                const updatedNodes = prev.nodes.map((node: DagNode) => {
-                  if (node.type === "task" && subtaskMap.has(node.id)) {
-                    return { ...node, subtasks: subtaskMap.get(node.id) };
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line);
+              if (event.type === "thought") {
+                setThinkingText((prev) => prev + event.text);
+              } else if (event.type === "status") {
+                setCompileStatus(event.text);
+              } else if (event.type === "plan") {
+                setCompileStartTime(null);
+                const receivedPlan = justMeMode ? convertToJustMe(event.plan) : event.plan;
+                setPlan(receivedPlan);
+                setStep("reveal");
+              } else if (event.type === "subtasks") {
+                // Merge subtasks into the existing plan
+                setPlan((prev) => {
+                  if (!prev) return prev;
+                  const subtaskMap = new Map<string, string[]>();
+                  for (const t of event.tasks) {
+                    subtaskMap.set(t.id, t.subtasks);
                   }
-                  if (node.type === "parallel_group") {
-                    return {
-                      ...node,
-                      children: node.children.map((child: Task) =>
-                        subtaskMap.has(child.id)
-                          ? { ...child, subtasks: subtaskMap.get(child.id) }
-                          : child
-                      ),
-                    };
-                  }
-                  return node;
+                  const updatedNodes = prev.nodes.map((node: DagNode) => {
+                    if (node.type === "task" && subtaskMap.has(node.id)) {
+                      return { ...node, subtasks: subtaskMap.get(node.id) };
+                    }
+                    if (node.type === "parallel_group") {
+                      return {
+                        ...node,
+                        children: node.children.map((child: Task) =>
+                          subtaskMap.has(child.id)
+                            ? { ...child, subtasks: subtaskMap.get(child.id) }
+                            : child
+                        ),
+                      };
+                    }
+                    return node;
+                  });
+                  return { ...prev, nodes: updatedNodes as DagNode[] };
                 });
-                return { ...prev, nodes: updatedNodes as DagNode[] };
-              });
-            } else if (event.type === "error") {
-              console.error("Compile error:", event.text);
-              setCompileStatus("error:" + (event.text || "Unknown error"));
-              setCompileStartTime(null);
+              } else if (event.type === "error") {
+                console.error("Compile error:", event.text);
+                setCompileStatus("error:" + (event.text || "Unknown error"));
+                setCompileStartTime(null);
+              }
+            } catch {
+              // skip malformed lines
             }
-          } catch {
-            // skip malformed lines
           }
         }
+      } catch (streamErr) {
+        console.error("Stream reading failed:", streamErr);
+        setCompileError("Connection lost while building your plan. Please try again.");
+        setCompileStartTime(null);
+        setStep("input");
       }
     } catch (err) {
       console.error("Compile failed:", err);
+      setCompileError("Failed to build plan: " + String(err));
       setCompileStartTime(null);
       setStep("input");
     }
@@ -822,6 +895,20 @@ export default function Home() {
                 </p>
               </div>
             </details>
+
+            {compileError && (
+              <div style={{
+                padding: "12px 16px",
+                borderRadius: 10,
+                background: "#CF522E0c",
+                border: "1px solid #CF522E30",
+                color: "#CF522E",
+                fontSize: 13,
+                marginBottom: 16,
+              }}>
+                {compileError}
+              </div>
+            )}
 
             <div style={{ position: "relative" }}>
               <textarea
@@ -1288,6 +1375,22 @@ export default function Home() {
                   >
                     Skip all
                   </button>
+                  <div style={{ flex: 1 }} />
+                  <button
+                    onClick={() => setStep("input")}
+                    style={{
+                      padding: "10px 16px",
+                      border: `1px solid ${BORDER}`,
+                      borderRadius: 10,
+                      background: "transparent",
+                      color: TEXT_LIGHT,
+                      fontSize: 13,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    &larr; Back to brief
+                  </button>
                 </div>
               </div>
             ) : (
@@ -1343,6 +1446,21 @@ export default function Home() {
                     }}
                   >
                     Try again
+                  </button>
+                  <button
+                    onClick={() => setStep("input")}
+                    style={{
+                      padding: "10px 16px",
+                      border: `1px solid ${BORDER}`,
+                      borderRadius: 10,
+                      background: "transparent",
+                      color: TEXT_LIGHT,
+                      fontSize: 13,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    &larr; Back to brief
                   </button>
                 </div>
               </div>
@@ -2069,6 +2187,44 @@ export default function Home() {
           );
         })()}
       </main>
+
+      {/* Undo toast */}
+      {undoToast && (
+        <div style={{
+          position: "fixed",
+          bottom: 24,
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "#37352F",
+          color: "#fff",
+          padding: "12px 20px",
+          borderRadius: 10,
+          fontSize: 14,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          zIndex: 1000,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+        }}>
+          <span>Task completed.</span>
+          <button
+            onClick={() => unmarkDone(undoToast.id)}
+            style={{
+              background: "none",
+              border: "none",
+              color: PRIMARY,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "'DM Sans', sans-serif",
+              textDecoration: "underline",
+              padding: 0,
+            }}
+          >
+            Undo
+          </button>
+        </div>
+      )}
     </div>
   );
 }
