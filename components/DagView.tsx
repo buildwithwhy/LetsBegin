@@ -10,7 +10,7 @@ import {
   SURFACE,
   TEXT,
 } from "@/lib/styles";
-import type { ExecutionMode, PriorResult } from "@/lib/styles";
+import type { ExecutionMode, PriorResult, UserToolConfig } from "@/lib/styles";
 import type { DagNode, Task, Energy, Assignee } from "@/lib/dag";
 import { getAllTasks } from "@/lib/dag";
 import type { AgentResult } from "@/hooks/useAgentExecutor";
@@ -76,6 +76,7 @@ export function DagView({
   onToggleSubtask,
   allTasks,
   executionMode = "api",
+  userTools,
 }: {
   nodes: DagNode[];
   energyFilter: Energy | "all";
@@ -89,6 +90,7 @@ export function DagView({
   onToggleSubtask: (id: string) => void;
   allTasks: Task[];
   executionMode?: ExecutionMode;
+  userTools?: UserToolConfig;
 }) {
   const [view, setView] = useState<"steps" | "graph">("steps");
   const [completedExpanded, setCompletedExpanded] = useState(false);
@@ -187,6 +189,7 @@ export function DagView({
                 priorResults={priorResults}
                 allTasksList={allTasks}
                 executionMode={executionMode}
+                userTools={userTools}
               />
             );
           }
@@ -226,6 +229,7 @@ export function DagView({
                     priorResults={priorResults}
                     allTasksList={allTasks}
                     executionMode={executionMode}
+                    userTools={userTools}
                   />
                 ))}
               </div>

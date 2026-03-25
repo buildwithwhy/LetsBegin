@@ -21,6 +21,7 @@ import { templates, type ProjectTemplate } from "@/lib/templates";
 import {
   PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, ENERGY_COLORS, FONT,
   type ExecutionMode, type Step, type ClarifyQuestion, type PriorResult,
+  type UserToolConfig, type UserTool, TOOL_CAPABILITIES,
 } from "@/lib/styles";
 import { Header } from "@/components/Header";
 import { ThinkingTerminal } from "@/components/ThinkingTerminal";
@@ -60,6 +61,7 @@ export default function Home() {
   const [assigneeFilter, setAssigneeFilter] = useState<Assignee | "all">("all");
   const [doneSubtaskIds, setDoneSubtaskIds] = useState<Set<string>>(new Set());
   const [executionMode, setExecutionMode] = useState<ExecutionMode>("api");
+  const [userTools, setUserTools] = useState<UserToolConfig>({ available: [] });
   const [justMeMode, setJustMeMode] = useState(false);
   const [currentEnergy, setCurrentEnergy] = useState<Energy | null>(null);
   const [streak, setStreak] = useState(0);
@@ -989,56 +991,67 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Execution mode toggle — BYO Agent */}
+            {/* AI Tools selector — what tools does the user have? */}
             {!justMeMode && (
               <div
                 style={{
                   marginTop: 12,
                   padding: "14px 16px",
                   borderRadius: 10,
-                  background: executionMode === "byo" ? "#E8F0FE08" : SURFACE,
-                  border: `1px solid ${executionMode === "byo" ? "#1967D230" : BORDER}`,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  cursor: "pointer",
+                  background: userTools.available.length > 0 ? "#E8F0FE08" : SURFACE,
+                  border: `1px solid ${userTools.available.length > 0 ? "#1967D230" : BORDER}`,
                   transition: "all 0.2s",
                 }}
-                onClick={() => setExecutionMode(executionMode === "api" ? "byo" : "api")}
               >
-                <div
-                  style={{
-                    width: 40,
-                    height: 22,
-                    borderRadius: 11,
-                    background: executionMode === "byo" ? "#1967D2" : BORDER,
-                    position: "relative",
-                    transition: "background 0.2s",
-                    flexShrink: 0,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 18,
-                      height: 18,
-                      borderRadius: "50%",
-                      background: "#fff",
-                      position: "absolute",
-                      top: 2,
-                      left: executionMode === "byo" ? 20 : 2,
-                      transition: "left 0.2s",
-                      boxShadow: "0 1px 3px rgba(0,0,0,0.15)",
-                    }}
-                  />
+                <div style={{ fontSize: 14, fontWeight: 600, color: userTools.available.length > 0 ? "#1967D2" : TEXT, marginBottom: 4 }}>
+                  What AI tools do you have?
                 </div>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: executionMode === "byo" ? "#1967D2" : TEXT }}>
-                    I have Claude Code / Claude Max
-                  </div>
-                  <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
-                    Agent tasks give you a ready-to-paste prompt instead of running through our API. Use your own Claude Code, ChatGPT, or any AI tool. No API keys needed.
-                  </div>
+                <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4, marginBottom: 10 }}>
+                  Select the tools you already pay for. We&apos;ll route tasks to your tools to save API costs. Leave empty to use our API for everything.
                 </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {(Object.keys(TOOL_CAPABILITIES) as UserTool[]).map((tool) => {
+                    const cap = TOOL_CAPABILITIES[tool];
+                    const isSelected = userTools.available.includes(tool);
+                    return (
+                      <button
+                        key={tool}
+                        onClick={() => {
+                          setUserTools((prev) => {
+                            const next = isSelected
+                              ? prev.available.filter((t) => t !== tool)
+                              : [...prev.available, tool];
+                            const newMode = next.length > 0 ? "byo" : "api";
+                            setExecutionMode(newMode);
+                            return { ...prev, available: next as UserTool[] };
+                          });
+                        }}
+                        style={{
+                          padding: "5px 10px",
+                          borderRadius: 7,
+                          border: `1.5px solid ${isSelected ? "#1967D2" : BORDER}`,
+                          background: isSelected ? "#E8F0FE" : "transparent",
+                          color: isSelected ? "#1967D2" : TEXT_LIGHT,
+                          fontSize: 12,
+                          fontWeight: isSelected ? 600 : 400,
+                          cursor: "pointer",
+                          fontFamily: "'DM Sans', sans-serif",
+                          transition: "all 0.15s",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        {cap.icon} {cap.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {userTools.available.length > 0 && (
+                  <div style={{ marginTop: 8, fontSize: 11, color: "#1967D2", fontWeight: 500 }}>
+                    {userTools.available.length} tool{userTools.available.length !== 1 ? "s" : ""} selected — agent tasks will use your tools instead of our API
+                  </div>
+                )}
               </div>
             )}
 
@@ -1696,6 +1709,7 @@ export default function Home() {
                         }))}
                       allTasksList={allTasks}
                       executionMode={executionMode}
+                      userTools={userTools}
                     />
 
                     {/* "I'm stuck" button — opens chat with a gentler first message */}
@@ -1945,7 +1959,7 @@ export default function Home() {
                     <span>
                       <strong style={{ color: TEXT }}>{total}</strong> total
                     </span>
-                    {executionMode === "byo" && (
+                    {executionMode === "byo" && userTools.available.length > 0 && (
                       <span
                         style={{
                           padding: "2px 8px", borderRadius: 5,
@@ -1953,13 +1967,13 @@ export default function Home() {
                           fontSize: 11, fontWeight: 600,
                           cursor: "pointer",
                         }}
-                        onClick={() => setExecutionMode("api")}
+                        onClick={() => { setExecutionMode("api"); setUserTools({ available: [] }); }}
                         title="Click to switch to API mode (agents run automatically)"
                       >
-                        BYO mode — click to switch
+                        Using your tools ({userTools.available.length}) — click to switch
                       </span>
                     )}
-                    {executionMode === "api" && (claudeCodeCount > 0 || builtinAgentCount > 0) && (
+                    {executionMode === "api" && userTools.available.length === 0 && (claudeCodeCount > 0 || builtinAgentCount > 0) && (
                       <span
                         style={{
                           padding: "2px 8px", borderRadius: 5,
@@ -1967,10 +1981,13 @@ export default function Home() {
                           fontSize: 11, fontWeight: 600,
                           cursor: "pointer",
                         }}
-                        onClick={() => setExecutionMode("byo")}
-                        title="Switch to BYO mode — run agent tasks in your own Claude Code"
+                        onClick={() => {
+                          setUserTools({ available: ["claude-code"] });
+                          setExecutionMode("byo");
+                        }}
+                        title="Switch to BYO mode — use your own AI tools"
                       >
-                        Have Claude Code? Switch to BYO
+                        Have your own AI tools? Switch to BYO
                       </span>
                     )}
                   </div>
@@ -2044,6 +2061,7 @@ export default function Home() {
                   onToggleSubtask={toggleSubtask}
                   allTasks={allTasks}
                   executionMode={executionMode}
+                  userTools={userTools}
                 />
               </div>
             )}

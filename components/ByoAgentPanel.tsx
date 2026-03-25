@@ -1,11 +1,32 @@
 "use client";
 
 import { useState } from "react";
-import { PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, FONT } from "@/lib/styles";
-import type { PriorResult } from "@/lib/styles";
+import { PRIMARY, BORDER, TEXT, TEXT_LIGHT } from "@/lib/styles";
+import type { PriorResult, TaskRouting } from "@/lib/styles";
 import type { Task } from "@/lib/dag";
 
-export function generateAgentPrompt(task: Task, projectContext: string, priorOutputs?: PriorResult[]): string {
+// Tool-specific prompt wrappers
+function wrapPromptForTool(basePrompt: string, style?: TaskRouting["promptStyle"]): string {
+  switch (style) {
+    case "claude-code":
+      return `${basePrompt}\n\n---\nYou are running as Claude Code. Use your tools to read/write files, run commands, and produce real outputs. Don't just describe what to do — actually do it.`;
+    case "cowork":
+      return `${basePrompt}\n\n---\nThis is a collaborative task in Cowork. Walk through the approach step by step. Present drafts inline so we can iterate together. Ask me if you need clarification on any decision.`;
+    case "chatgpt":
+      return `${basePrompt}\n\n---\nProduce the complete output directly. Don't ask follow-up questions unless genuinely necessary. Format with markdown for readability.`;
+    case "gemini":
+      return `${basePrompt}\n\n---\nProduce thorough, well-structured output. Use markdown formatting. Be specific and actionable.`;
+    default:
+      return basePrompt;
+  }
+}
+
+export function generateAgentPrompt(
+  task: Task,
+  projectContext: string,
+  priorOutputs?: PriorResult[],
+  promptStyle?: TaskRouting["promptStyle"],
+): string {
   const lines: string[] = [];
   lines.push(`# Task: ${task.title}`);
   lines.push("");
@@ -42,7 +63,7 @@ export function generateAgentPrompt(task: Task, projectContext: string, priorOut
     lines.push("");
     lines.push("**Research guidance:** For each person/item found, include their name, role/affiliation, why they're relevant, and how to contact them (email, website, social). Be thorough — I'll use this list to actually reach out.");
   }
-  return lines.join("\n");
+  return wrapPromptForTool(lines.join("\n"), promptStyle);
 }
 
 export function ByoAgentPanel({
@@ -50,17 +71,21 @@ export function ByoAgentPanel({
   projectContext,
   priorResults,
   onComplete,
+  routing,
 }: {
   task: Task;
   projectContext: string;
   priorResults: PriorResult[];
   onComplete: (id: string, notes?: string) => void;
+  routing?: TaskRouting;
 }) {
   const [copied, setCopied] = useState(false);
   const [pasteMode, setPasteMode] = useState(false);
   const [pastedResult, setPastedResult] = useState("");
 
-  const prompt = generateAgentPrompt(task, projectContext, priorResults);
+  const toolLabel = routing?.label || "your AI tool";
+  const toolIcon = routing?.icon || "\u26A1";
+  const prompt = generateAgentPrompt(task, projectContext, priorResults, routing?.promptStyle);
 
   const copyPrompt = () => {
     navigator.clipboard.writeText(prompt).then(() => {
@@ -76,7 +101,7 @@ export function ByoAgentPanel({
         padding: "4px 10px", borderRadius: 6,
         background: "#E8F0FE", color: "#1967D2", fontSize: 12, fontWeight: 600, marginBottom: 8,
       }}>
-        BYO Agent — run this in Claude Code, ChatGPT, or any AI tool
+        {toolIcon} Run in {toolLabel}
       </div>
 
       {/* Copy prompt */}
@@ -101,7 +126,7 @@ export function ByoAgentPanel({
             transition: "background 0.2s",
           }}
         >
-          {copied ? "Copied!" : "Copy prompt"}
+          {copied ? "Copied!" : `Copy for ${toolLabel}`}
         </button>
         <button
           onClick={() => setPasteMode(!pasteMode)}

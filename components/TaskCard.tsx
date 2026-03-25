@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, ENERGY_COLORS, FONT } from "@/lib/styles";
-import { ExecutionMode, PriorResult } from "@/lib/styles";
+import { ExecutionMode, PriorResult, TaskRouting, UserToolConfig, routeTask } from "@/lib/styles";
 import { Task, Subtask, DagNode, Energy, AgentType, ActivityEvent } from "@/lib/dag";
 import { AgentResult, AgentStep } from "@/hooks/useAgentExecutor";
 import { AgentPanel } from "@/components/AgentPanel";
@@ -11,6 +11,18 @@ import { TaskChat } from "@/components/TaskChat";
 import { ByoAgentPanel } from "@/components/ByoAgentPanel";
 
 // ─── Helpers ───
+
+// Map a task to the routing task type based on its properties
+function inferTaskType(task: Task): "coding" | "writing" | "research" | "planning" | "review" {
+  if (task.agent_type === "claude-code") return "coding";
+  if (task.assignee === "hybrid") return "review";
+  const lower = (task.title + " " + task.description).toLowerCase();
+  if (lower.match(/code|build|implement|debug|deploy|api|endpoint|database|schema|migration/)) return "coding";
+  if (lower.match(/research|find|extract|analyze|compare|investigate|survey/)) return "research";
+  if (lower.match(/plan|design|architect|strategy|roadmap|outline/)) return "planning";
+  if (lower.match(/review|audit|check|evaluate|assess|approve/)) return "review";
+  return "writing";
+}
 
 function formatDuration(startedAt: string, completedAt?: string): string {
   const start = new Date(startedAt).getTime();
@@ -127,6 +139,7 @@ export function TaskCard({
   priorResults,
   allTasksList,
   executionMode = "api",
+  userTools,
 }: {
   task: Task;
   result?: AgentResult;
@@ -140,6 +153,7 @@ export function TaskCard({
   priorResults: PriorResult[];
   allTasksList?: Task[];
   executionMode?: ExecutionMode;
+  userTools?: UserToolConfig;
 }) {
   const isLocked = task.status === "locked";
   const isDone = task.status === "done";
@@ -147,6 +161,11 @@ export function TaskCard({
   const [doneExpanded, setDoneExpanded] = useState(false);
   const [noteText, setNoteText] = useState(task.notes || "");
   const [showNotes, setShowNotes] = useState(false);
+
+  // Compute per-task routing from user's tool config
+  const taskRouting = userTools && userTools.available.length > 0
+    ? routeTask(inferTaskType(task), userTools)
+    : undefined;
 
   const agentLabel = task.agent_type === "claude-code" ? "Claude Code"
     : task.agent_type === "custom" ? "Custom Agent" : "Agent";
@@ -285,6 +304,7 @@ export function TaskCard({
           projectContext={projectSummary}
           priorResults={priorResults}
           onComplete={onMarkDone}
+          routing={taskRouting}
         />
       )}
       {isPending && !result && task.assignee === "hybrid" && executionMode === "api" && (
@@ -311,6 +331,7 @@ export function TaskCard({
           projectContext={projectSummary}
           priorResults={priorResults}
           onComplete={onMarkDone}
+          routing={taskRouting}
         />
       )}
       {isPending && !result && task.assignee === "user" && (
