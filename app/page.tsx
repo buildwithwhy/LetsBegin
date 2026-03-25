@@ -880,6 +880,7 @@ function TaskCard({
   onToggleSubtask,
   priorResults,
   allTasksList,
+  executionMode = "api",
 }: {
   task: Task;
   result?: AgentResult;
@@ -892,6 +893,7 @@ function TaskCard({
   onToggleSubtask: (id: string) => void;
   priorResults: PriorResult[];
   allTasksList?: Task[];
+  executionMode?: ExecutionMode;
 }) {
   const isLocked = task.status === "locked";
   const isDone = task.status === "done";
@@ -1025,13 +1027,21 @@ function TaskCard({
         />
       )}
 
-      {isPending && !result && task.assignee === "agent" && (
+      {isPending && !result && task.assignee === "agent" && executionMode === "api" && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PRIMARY }}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: PRIMARY, animation: "pulse 1.5s ease-in-out infinite" }} />
           Running automatically...
         </div>
       )}
-      {isPending && !result && task.assignee === "hybrid" && (
+      {isPending && !result && task.assignee === "agent" && executionMode === "byo" && (
+        <ByoAgentPanel
+          task={task}
+          projectContext={projectSummary}
+          priorResults={priorResults}
+          onComplete={onMarkDone}
+        />
+      )}
+      {isPending && !result && task.assignee === "hybrid" && executionMode === "api" && (
         <button
           onClick={() => onRunAgent(task)}
           style={{
@@ -1048,6 +1058,14 @@ function TaskCard({
         >
           &#x26A1; Start agent draft &rarr;
         </button>
+      )}
+      {isPending && !result && task.assignee === "hybrid" && executionMode === "byo" && (
+        <ByoAgentPanel
+          task={task}
+          projectContext={projectSummary}
+          priorResults={priorResults}
+          onComplete={onMarkDone}
+        />
       )}
       {isPending && !result && task.assignee === "user" && (
         <div>
@@ -1308,6 +1326,7 @@ function DagView({
   doneSubtaskIds,
   onToggleSubtask,
   allTasks,
+  executionMode = "api",
 }: {
   nodes: DagNode[];
   energyFilter: Energy | "all";
@@ -1320,6 +1339,7 @@ function DagView({
   doneSubtaskIds: Set<string>;
   onToggleSubtask: (id: string) => void;
   allTasks: Task[];
+  executionMode?: ExecutionMode;
 }) {
   const [view, setView] = useState<"steps" | "graph">("steps");
   const [completedExpanded, setCompletedExpanded] = useState(false);
@@ -1417,6 +1437,7 @@ function DagView({
                 onToggleSubtask={onToggleSubtask}
                 priorResults={priorResults}
                 allTasksList={allTasks}
+                executionMode={executionMode}
               />
             );
           }
@@ -1455,6 +1476,7 @@ function DagView({
                     onToggleSubtask={onToggleSubtask}
                     priorResults={priorResults}
                     allTasksList={allTasks}
+                    executionMode={executionMode}
                   />
                 ))}
               </div>
@@ -1565,6 +1587,153 @@ function energyDot(e: Energy) {
   return e === "high" ? "\uD83D\uDD34" : e === "medium" ? "\uD83D\uDFE1" : "\uD83D\uDFE2";
 }
 
+// ─── BYO Agent Panel ───
+// For users who have Claude Code / Claude Max / ChatGPT and want to run agent tasks there
+
+type ExecutionMode = "api" | "byo";
+
+function generateAgentPrompt(task: Task, projectContext: string, priorOutputs?: PriorResult[]): string {
+  const lines: string[] = [];
+  lines.push(`# Task: ${task.title}`);
+  lines.push("");
+  lines.push(`## Description`);
+  lines.push(task.description);
+  lines.push("");
+  lines.push(`## Project context`);
+  lines.push(projectContext);
+  if (priorOutputs && priorOutputs.length > 0) {
+    lines.push("");
+    lines.push(`## Prior completed work`);
+    for (const p of priorOutputs) {
+      lines.push(`- **${p.title}** (${p.assignee}): ${p.output.slice(0, 300)}${p.output.length > 300 ? "..." : ""}`);
+    }
+  }
+  lines.push("");
+  lines.push(`## Instructions`);
+  if (task.agent_type === "claude-code") {
+    lines.push("This is a coding task. Write production-quality code. Create complete, working files — not snippets or placeholders.");
+  } else {
+    lines.push("Complete this task thoroughly. Produce real, actionable output — not summaries or placeholders.");
+  }
+  if (task.assignee === "hybrid") {
+    lines.push("");
+    lines.push("**This is a hybrid task** — you draft, then I review. Present options clearly so I can choose. Label drafts as drafts.");
+  }
+  return lines.join("\n");
+}
+
+function ByoAgentPanel({
+  task,
+  projectContext,
+  priorResults,
+  onComplete,
+}: {
+  task: Task;
+  projectContext: string;
+  priorResults: PriorResult[];
+  onComplete: (id: string, notes?: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [pasteMode, setPasteMode] = useState(false);
+  const [pastedResult, setPastedResult] = useState("");
+
+  const prompt = generateAgentPrompt(task, projectContext, priorResults);
+
+  const copyPrompt = () => {
+    navigator.clipboard.writeText(prompt).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{
+        display: "inline-flex", alignItems: "center", gap: 6,
+        padding: "4px 10px", borderRadius: 6,
+        background: "#E8F0FE", color: "#1967D2", fontSize: 12, fontWeight: 600, marginBottom: 8,
+      }}>
+        BYO Agent — run this in Claude Code, ChatGPT, or any AI tool
+      </div>
+
+      {/* Copy prompt */}
+      <div style={{
+        background: "#1C1C1E", borderRadius: 10, padding: 14,
+        maxHeight: 160, overflow: "auto", fontSize: 12,
+        fontFamily: "'DM Mono', 'Fira Code', monospace",
+        lineHeight: 1.5, color: "#8FBC8F", marginBottom: 8,
+        whiteSpace: "pre-wrap", wordBreak: "break-word",
+      }}>
+        {prompt}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button
+          onClick={copyPrompt}
+          style={{
+            padding: "7px 16px", border: "none", borderRadius: 8,
+            background: copied ? "#2DA44E" : PRIMARY,
+            color: "#fff", fontSize: 13, fontWeight: 600,
+            cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+            transition: "background 0.2s",
+          }}
+        >
+          {copied ? "Copied!" : "Copy prompt"}
+        </button>
+        <button
+          onClick={() => setPasteMode(!pasteMode)}
+          style={{
+            padding: "7px 16px", border: `1px solid ${BORDER}`, borderRadius: 8,
+            background: "transparent", color: TEXT,
+            fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+          }}
+        >
+          {pasteMode ? "Hide" : "Paste result back"}
+        </button>
+        <button
+          onClick={() => onComplete(task.id)}
+          style={{
+            padding: "7px 16px", border: `1px solid ${BORDER}`, borderRadius: 8,
+            background: "transparent", color: TEXT_LIGHT,
+            fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+          }}
+        >
+          Mark done without pasting
+        </button>
+      </div>
+
+      {pasteMode && (
+        <div style={{ marginTop: 10 }}>
+          <textarea
+            value={pastedResult}
+            onChange={(e) => setPastedResult(e.target.value)}
+            placeholder="Paste the AI's output here so it's tracked in your project..."
+            style={{
+              width: "100%", minHeight: 100, padding: 12, fontSize: 13,
+              fontFamily: "'DM Sans', sans-serif", borderRadius: 10,
+              border: `1px solid ${BORDER}`, background: "#FAFAF9",
+              outline: "none", resize: "vertical", lineHeight: 1.5,
+              boxSizing: "border-box",
+            }}
+          />
+          {pastedResult.trim() && (
+            <button
+              onClick={() => onComplete(task.id, pastedResult.trim())}
+              style={{
+                marginTop: 8, padding: "8px 18px", border: "none", borderRadius: 8,
+                background: "#2DA44E", color: "#fff", fontSize: 13, fontWeight: 600,
+                cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+              }}
+            >
+              Save result & mark done
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ───
 
 type ClarifyQuestion = {
@@ -1608,6 +1777,7 @@ export default function Home() {
   const [energyFilter, setEnergyFilter] = useState<Energy | "all">("all");
   const [assigneeFilter, setAssigneeFilter] = useState<Assignee | "all">("all");
   const [doneSubtaskIds, setDoneSubtaskIds] = useState<Set<string>>(new Set());
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>("api");
   const [justMeMode, setJustMeMode] = useState(false);
   const [currentEnergy, setCurrentEnergy] = useState<Energy | null>(null);
   const [streak, setStreak] = useState(0);
@@ -1811,10 +1981,10 @@ export default function Home() {
     return () => clearTimeout(timeout);
   }, [plan, doneIds, doneSubtaskIds, user, brief, savePlan, savedPlanId]);
 
-  // Auto-run agent tasks when they become unblocked
+  // Auto-run agent tasks when they become unblocked (API mode only)
   const currentTasksForAutoRun = getAllTasks(currentNodes);
   useEffect(() => {
-    if (step !== "reveal" || !plan) return;
+    if (step !== "reveal" || !plan || executionMode === "byo") return;
 
     for (const task of currentTasksForAutoRun) {
       if (
@@ -1831,7 +2001,7 @@ export default function Home() {
         }, launchedAgentTasks.current.size * 500);
       }
     }
-  }, [currentTasksForAutoRun, step, plan, results, execute, brief]);
+  }, [currentTasksForAutoRun, step, plan, results, execute, brief, executionMode]);
 
   const handleRunAgent = (task: Task, force?: boolean) => {
     launchedAgentTasks.current.add(task.id);
@@ -2537,6 +2707,59 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Execution mode toggle — BYO Agent */}
+            {!justMeMode && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: "14px 16px",
+                  borderRadius: 10,
+                  background: executionMode === "byo" ? "#E8F0FE08" : SURFACE,
+                  border: `1px solid ${executionMode === "byo" ? "#1967D230" : BORDER}`,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                }}
+                onClick={() => setExecutionMode(executionMode === "api" ? "byo" : "api")}
+              >
+                <div
+                  style={{
+                    width: 40,
+                    height: 22,
+                    borderRadius: 11,
+                    background: executionMode === "byo" ? "#1967D2" : BORDER,
+                    position: "relative",
+                    transition: "background 0.2s",
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 18,
+                      height: 18,
+                      borderRadius: "50%",
+                      background: "#fff",
+                      position: "absolute",
+                      top: 2,
+                      left: executionMode === "byo" ? 20 : 2,
+                      transition: "left 0.2s",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.15)",
+                    }}
+                  />
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: executionMode === "byo" ? "#1967D2" : TEXT }}>
+                    I have Claude Code / Claude Max
+                  </div>
+                  <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
+                    Agent tasks give you a ready-to-paste prompt instead of running through our API. Use your own Claude Code, ChatGPT, or any AI tool. No API keys needed.
+                  </div>
+                </div>
+              </div>
+            )}
+
             <button
               onClick={handleClarify}
               disabled={brief.trim().length < 10}
@@ -3175,6 +3398,7 @@ export default function Home() {
                             .join("\n") || "",
                         }))}
                       allTasksList={allTasks}
+                      executionMode={executionMode}
                     />
 
                     {/* "I'm stuck" button — opens chat with a gentler first message */}
@@ -3404,7 +3628,7 @@ export default function Home() {
                   <p style={{ fontSize: 14, color: "#787774", lineHeight: 1.6, marginBottom: 14 }}>
                     {plan.summary}
                   </p>
-                  <div style={{ display: "flex", gap: 16, fontSize: 13, color: TEXT_LIGHT, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 16, fontSize: 13, color: TEXT_LIGHT, flexWrap: "wrap", alignItems: "center" }}>
                     {claudeCodeCount > 0 && (
                       <span>
                         <strong style={{ color: "#C4841D" }}>{claudeCodeCount}</strong> Claude Code
@@ -3424,6 +3648,34 @@ export default function Home() {
                     <span>
                       <strong style={{ color: TEXT }}>{total}</strong> total
                     </span>
+                    {executionMode === "byo" && (
+                      <span
+                        style={{
+                          padding: "2px 8px", borderRadius: 5,
+                          background: "#E8F0FE", color: "#1967D2",
+                          fontSize: 11, fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                        onClick={() => setExecutionMode("api")}
+                        title="Click to switch to API mode (agents run automatically)"
+                      >
+                        BYO mode — click to switch
+                      </span>
+                    )}
+                    {executionMode === "api" && (claudeCodeCount > 0 || builtinAgentCount > 0) && (
+                      <span
+                        style={{
+                          padding: "2px 8px", borderRadius: 5,
+                          background: `${PRIMARY}14`, color: PRIMARY,
+                          fontSize: 11, fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                        onClick={() => setExecutionMode("byo")}
+                        title="Switch to BYO mode — run agent tasks in your own Claude Code"
+                      >
+                        Have Claude Code? Switch to BYO
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -3494,6 +3746,7 @@ export default function Home() {
                   doneSubtaskIds={doneSubtaskIds}
                   onToggleSubtask={toggleSubtask}
                   allTasks={allTasks}
+                  executionMode={executionMode}
                 />
               </div>
             )}
