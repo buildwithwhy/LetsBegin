@@ -170,8 +170,3 @@ I need:
 - Track responses and next steps`,
   },
 ];
-
-export function getTemplatesByCategory(category?: string): ProjectTemplate[] {
-  if (!category) return templates;
-  return templates.filter((t) => t.category === category);
-}

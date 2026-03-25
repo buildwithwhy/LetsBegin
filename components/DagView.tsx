@@ -6,12 +6,11 @@ import {
   BORDER,
   TEXT_LIGHT,
   ENERGY_COLORS,
-  FONT,
   SURFACE,
   TEXT,
 } from "@/lib/styles";
 import type { ExecutionMode, PriorResult, UserToolConfig } from "@/lib/styles";
-import type { DagNode, Task, Energy, Assignee } from "@/lib/dag";
+import type { DagNode, Task, Energy, Assignee, AgentType } from "@/lib/dag";
 import { getAllTasks } from "@/lib/dag";
 import type { AgentResult } from "@/hooks/useAgentExecutor";
 import { TaskCard } from "@/components/TaskCard";
@@ -77,6 +76,7 @@ export function DagView({
   allTasks,
   executionMode = "api",
   userTools,
+  onEditTask,
 }: {
   nodes: DagNode[];
   energyFilter: Energy | "all";
@@ -91,6 +91,7 @@ export function DagView({
   allTasks: Task[];
   executionMode?: ExecutionMode;
   userTools?: UserToolConfig;
+  onEditTask?: (id: string, updates: { title?: string; description?: string; assignee?: Assignee; agent_type?: AgentType }) => void;
 }) {
   const [view, setView] = useState<"steps" | "graph">("steps");
   const [completedExpanded, setCompletedExpanded] = useState(false);
@@ -190,6 +191,7 @@ export function DagView({
                 allTasksList={allTasks}
                 executionMode={executionMode}
                 userTools={userTools}
+                onEditTask={onEditTask}
               />
             );
           }

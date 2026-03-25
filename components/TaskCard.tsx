@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, ENERGY_COLORS, FONT } from "@/lib/styles";
+import { PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, ENERGY_COLORS } from "@/lib/styles";
 import { ExecutionMode, PriorResult, TaskRouting, UserToolConfig, routeTask } from "@/lib/styles";
-import { Task, Subtask, DagNode, Energy, AgentType, ActivityEvent } from "@/lib/dag";
+import { Task, Subtask, DagNode, Energy, Assignee, AgentType, ActivityEvent } from "@/lib/dag";
 import { AgentResult, AgentStep } from "@/hooks/useAgentExecutor";
 import { AgentPanel } from "@/components/AgentPanel";
 import { SubtaskList, SubtaskItem } from "@/components/SubtaskList";
@@ -74,6 +74,7 @@ export function TaskCard({
   allTasksList,
   executionMode = "api",
   userTools,
+  onEditTask,
 }: {
   task: Task;
   result?: AgentResult;
@@ -88,6 +89,7 @@ export function TaskCard({
   allTasksList?: Task[];
   executionMode?: ExecutionMode;
   userTools?: UserToolConfig;
+  onEditTask?: (id: string, updates: { title?: string; description?: string; assignee?: Assignee; agent_type?: AgentType }) => void;
 }) {
   const isLocked = task.status === "locked";
   const isDone = task.status === "done";
@@ -95,6 +97,10 @@ export function TaskCard({
   const [doneExpanded, setDoneExpanded] = useState(false);
   const [noteText, setNoteText] = useState(task.notes || "");
   const [showNotes, setShowNotes] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [editTitle, setEditTitle] = useState(task.title);
+  const [editDesc, setEditDesc] = useState(task.description);
 
   // Compute per-task routing from user's tool config
   const taskRouting = userTools && userTools.available.length > 0
@@ -174,6 +180,27 @@ export function TaskCard({
           >
             {assigneeConfig.icon} {assigneeConfig.label}
           </span>
+          {isPending && onEditTask && (
+            <select
+              value={task.assignee}
+              onChange={(e) => {
+                const newAssignee = e.target.value as Assignee;
+                const updates: { assignee: Assignee; agent_type?: AgentType } = { assignee: newAssignee };
+                if (newAssignee === "user") updates.agent_type = undefined;
+                else if (newAssignee === "agent") updates.agent_type = "builtin";
+                onEditTask(task.id, updates);
+              }}
+              style={{
+                fontSize: 10, padding: "1px 2px", borderRadius: 4,
+                border: `1px solid ${BORDER}`, background: SURFACE,
+                color: TEXT_LIGHT, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+              }}
+            >
+              <option value="agent">Agent</option>
+              <option value="user">You</option>
+              <option value="hybrid">Hybrid</option>
+            </select>
+          )}
           <span
             style={{
               display: "inline-flex",
@@ -195,10 +222,64 @@ export function TaskCard({
         {isLocked && <span style={{ fontSize: 14 }}>&#x1F512;</span>}
         {isDone && <span onClick={() => setDoneExpanded(false)} style={{ fontSize: 14, color: "#2DA44E", cursor: "pointer" }}>{"\u2713 \u25BC"}</span>}
       </div>
-      <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{task.title}</div>
-      <div style={{ fontSize: 13, color: "#787774", lineHeight: 1.5, marginBottom: 8 }}>
-        {task.description}
-      </div>
+      {isPending && onEditTask && editingTitle ? (
+        <input
+          value={editTitle}
+          onChange={(e) => setEditTitle(e.target.value)}
+          onBlur={() => {
+            setEditingTitle(false);
+            if (editTitle.trim() && editTitle !== task.title) {
+              onEditTask(task.id, { title: editTitle.trim() });
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") { setEditTitle(task.title); setEditingTitle(false); }
+          }}
+          autoFocus
+          style={{
+            fontSize: 15, fontWeight: 600, marginBottom: 4, width: "100%",
+            border: `1px solid ${PRIMARY}`, borderRadius: 6, padding: "2px 6px",
+            fontFamily: "'DM Sans', sans-serif", outline: "none", boxSizing: "border-box",
+          }}
+        />
+      ) : (
+        <div
+          style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, cursor: isPending && onEditTask ? "text" : "default" }}
+          onClick={() => { if (isPending && onEditTask) { setEditTitle(task.title); setEditingTitle(true); } }}
+        >
+          {task.title}
+        </div>
+      )}
+      {isPending && onEditTask && editingDesc ? (
+        <textarea
+          value={editDesc}
+          onChange={(e) => setEditDesc(e.target.value)}
+          onBlur={() => {
+            setEditingDesc(false);
+            if (editDesc.trim() && editDesc !== task.description) {
+              onEditTask(task.id, { description: editDesc.trim() });
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") { setEditDesc(task.description); setEditingDesc(false); }
+          }}
+          autoFocus
+          style={{
+            fontSize: 13, color: "#787774", lineHeight: 1.5, marginBottom: 8, width: "100%",
+            border: `1px solid ${PRIMARY}`, borderRadius: 6, padding: "4px 6px",
+            fontFamily: "'DM Sans', sans-serif", outline: "none", resize: "vertical",
+            minHeight: 40, boxSizing: "border-box",
+          }}
+        />
+      ) : (
+        <div
+          style={{ fontSize: 13, color: "#787774", lineHeight: 1.5, marginBottom: 8, cursor: isPending && onEditTask ? "text" : "default" }}
+          onClick={() => { if (isPending && onEditTask) { setEditDesc(task.description); setEditingDesc(true); } }}
+        >
+          {task.description}
+        </div>
+      )}
 
       {task.depends_on.length > 0 && isLocked && (
         <div style={{ fontSize: 11, color: TEXT_LIGHT, marginBottom: 8 }}>

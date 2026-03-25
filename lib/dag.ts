@@ -123,28 +123,6 @@ export function computeUnlocked(nodes: DagNode[], doneIds: Set<string>): DagNode
   });
 }
 
-export function findNextActive(nodes: DagNode[]): string | null {
-  for (const node of nodes) {
-    if (node.type === "task" && node.status === "pending") {
-      return node.id;
-    }
-    if (node.type === "parallel_group" && node.status === "pending") {
-      for (const child of node.children) {
-        if (child.status === "pending") return child.id;
-      }
-    }
-  }
-  return null;
-}
-
-// Add an activity event to a task (returns new task)
-export function addActivity(task: Task, event: ActivityEvent): Task {
-  return {
-    ...task,
-    activity: [...(task.activity || []), event],
-  };
-}
-
 // ─── Smart task scheduling ───
 // Scores pending tasks by project management best practices:
 // 1. Tasks with long wait times after (emails, approvals) → do first

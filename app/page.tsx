@@ -19,7 +19,7 @@ import { usePlanStorage } from "@/hooks/usePlanStorage";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { templates, type ProjectTemplate } from "@/lib/templates";
 import {
-  PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, ENERGY_COLORS, FONT,
+  PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, ENERGY_COLORS,
   type ExecutionMode, type Step, type ClarifyQuestion, type PriorResult,
   type UserToolConfig, type UserTool, TOOL_CAPABILITIES,
 } from "@/lib/styles";
@@ -30,7 +30,7 @@ import { DagView } from "@/components/DagView";
 
 export default function Home() {
   const { user, loading: authLoading, signInWithEmail, signUpWithEmail, signOut, configured: authConfigured } = useAuth();
-  const { savePlan, loadPlans, updateProgress, deletePlan } = usePlanStorage(user?.id);
+  const { savePlan, loadPlans, deletePlan } = usePlanStorage(user?.id);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -85,6 +85,11 @@ export default function Home() {
   const [showBreakReminder, setShowBreakReminder] = useState(false);
   const [undoToast, setUndoToast] = useState<{ id: string; title: string } | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newTaskDesc, setNewTaskDesc] = useState("");
+  const [newTaskAssignee, setNewTaskAssignee] = useState<Assignee>("user");
+  const [newTaskEnergy, setNewTaskEnergy] = useState<Energy>("medium");
 
   const { execute, results, running, runningCount } = useAgentExecutor();
 
@@ -255,6 +260,40 @@ export default function Home() {
     });
     setUndoToast(null);
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+  }, []);
+
+  const addNewTask = useCallback((title: string, description: string, assignee: Assignee, energy: Energy) => {
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const newTask: Task = {
+        id: `custom-${Date.now()}`,
+        type: "task",
+        title,
+        description,
+        assignee,
+        energy,
+        status: "pending",
+        depends_on: [],
+        agent_type: assignee === "agent" ? "builtin" : undefined,
+      };
+      return { ...prev, nodes: [...prev.nodes, newTask] };
+    });
+  }, []);
+
+  const editTask = useCallback((taskId: string, updates: { title?: string; description?: string; assignee?: Assignee; agent_type?: AgentType }) => {
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const updateTask = (t: Task): Task => {
+        if (t.id !== taskId) return t;
+        return { ...t, ...updates };
+      };
+      return {
+        ...prev,
+        nodes: prev.nodes.map((n): DagNode =>
+          n.type === "task" ? updateTask(n) : { ...n, children: n.children.map(updateTask) }
+        ),
+      };
+    });
   }, []);
 
   const addNote = useCallback((taskId: string, note: string) => {
@@ -1860,6 +1899,7 @@ export default function Home() {
                       allTasksList={allTasks}
                       executionMode={executionMode}
                       userTools={userTools}
+                      onEditTask={editTask}
                     />
 
                     {/* "I'm stuck" button — opens chat with a gentler first message */}
@@ -2195,7 +2235,107 @@ export default function Home() {
                       </button>
                     ))}
                   </div>
+                  <button
+                    onClick={() => setShowAddTask(!showAddTask)}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 6,
+                      border: `1px dashed ${BORDER}`,
+                      background: "transparent",
+                      color: TEXT_LIGHT,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    + Add task
+                  </button>
                 </div>
+
+                {showAddTask && (
+                  <div style={{
+                    background: SURFACE,
+                    borderRadius: 10,
+                    padding: 16,
+                    border: `1px solid ${BORDER}`,
+                    marginBottom: 16,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}>
+                    <input
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      placeholder="Task title"
+                      style={{
+                        padding: "8px 10px", fontSize: 13, borderRadius: 6,
+                        border: `1px solid ${BORDER}`, outline: "none",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    />
+                    <textarea
+                      value={newTaskDesc}
+                      onChange={(e) => setNewTaskDesc(e.target.value)}
+                      placeholder="Description (optional)"
+                      style={{
+                        padding: "8px 10px", fontSize: 12, borderRadius: 6,
+                        border: `1px solid ${BORDER}`, outline: "none",
+                        fontFamily: "'DM Sans', sans-serif", resize: "vertical",
+                        minHeight: 40,
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <select
+                        value={newTaskAssignee}
+                        onChange={(e) => setNewTaskAssignee(e.target.value as Assignee)}
+                        style={{ padding: "4px 8px", fontSize: 12, borderRadius: 6, border: `1px solid ${BORDER}`, fontFamily: "'DM Sans', sans-serif" }}
+                      >
+                        <option value="user">You</option>
+                        <option value="agent">Agent</option>
+                        <option value="hybrid">Hybrid</option>
+                      </select>
+                      <select
+                        value={newTaskEnergy}
+                        onChange={(e) => setNewTaskEnergy(e.target.value as Energy)}
+                        style={{ padding: "4px 8px", fontSize: 12, borderRadius: 6, border: `1px solid ${BORDER}`, fontFamily: "'DM Sans', sans-serif" }}
+                      >
+                        <option value="low">Low effort</option>
+                        <option value="medium">Medium effort</option>
+                        <option value="high">High effort</option>
+                      </select>
+                      <button
+                        onClick={() => {
+                          if (!newTaskTitle.trim()) return;
+                          addNewTask(newTaskTitle.trim(), newTaskDesc.trim(), newTaskAssignee, newTaskEnergy);
+                          setNewTaskTitle("");
+                          setNewTaskDesc("");
+                          setShowAddTask(false);
+                        }}
+                        disabled={!newTaskTitle.trim()}
+                        style={{
+                          padding: "6px 16px", border: "none", borderRadius: 6,
+                          background: newTaskTitle.trim() ? PRIMARY : "#ccc",
+                          color: "#fff", fontSize: 12, fontWeight: 600,
+                          cursor: newTaskTitle.trim() ? "pointer" : "not-allowed",
+                          fontFamily: "'DM Sans', sans-serif",
+                        }}
+                      >
+                        Add
+                      </button>
+                      <button
+                        onClick={() => setShowAddTask(false)}
+                        style={{
+                          padding: "6px 12px", border: "none", borderRadius: 6,
+                          background: "transparent", color: TEXT_LIGHT, fontSize: 12,
+                          cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* DAG view */}
                 <DagView
@@ -2212,6 +2352,7 @@ export default function Home() {
                   allTasks={allTasks}
                   executionMode={executionMode}
                   userTools={userTools}
+                  onEditTask={editTask}
                 />
               </div>
             )}
