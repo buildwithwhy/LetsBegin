@@ -547,6 +547,7 @@ function TaskChat({
   if (!open) {
     return (
       <button
+        data-task-chat={task.id}
         onClick={() => setOpen(true)}
         style={{
           padding: "5px 12px",
@@ -1597,6 +1598,12 @@ export default function Home() {
   const [energyFilter, setEnergyFilter] = useState<Energy | "all">("all");
   const [assigneeFilter, setAssigneeFilter] = useState<Assignee | "all">("all");
   const [doneSubtaskIds, setDoneSubtaskIds] = useState<Set<string>>(new Set());
+  const [justMeMode, setJustMeMode] = useState(false);
+  const [currentEnergy, setCurrentEnergy] = useState<Energy | null>(null);
+  const [streak, setStreak] = useState(0);
+  const [lastCompletedAt, setLastCompletedAt] = useState<number | null>(null);
+  const [showEncouragement, setShowEncouragement] = useState<string | null>(null);
+  const [showBreakReminder, setShowBreakReminder] = useState(false);
 
   const { execute, results, running, runningCount } = useAgentExecutor();
 
@@ -1614,6 +1621,28 @@ export default function Home() {
   const doneCount = allTasks.filter((t) => doneIds.has(t.id)).length;
 
   const currentNodes = plan ? computeUnlocked(plan.nodes, doneIds) : [];
+
+  // Encouragement messages for completing tasks
+  const encouragements = [
+    "Nice work! One down.",
+    "You're making progress.",
+    "That's done. On to the next.",
+    "Steady progress. Keep going.",
+    "Another one handled.",
+    "You're on a roll.",
+    "Well done. Take a breath if you need.",
+    "That wasn't so bad, right?",
+    "Progress feels good.",
+    "One step closer.",
+  ];
+  const streakEncouragements = [
+    "", // 0
+    "", // 1
+    "Two in a row!", // 2
+    "Three tasks done. You're in the zone.", // 3
+    "Four! Seriously impressive focus.", // 4
+    "Five tasks straight. Consider a break soon.", // 5
+  ];
 
   const markDone = useCallback(
     (id: string, notes?: string) => {
@@ -1639,7 +1668,20 @@ export default function Home() {
           ),
         };
       });
+      // Streak and encouragement tracking
+      const now = Date.now();
+      setStreak((prev) => {
+        const newStreak = prev + 1;
+        // Show break reminder after 5+ tasks
+        if (newStreak >= 5) setShowBreakReminder(true);
+        return newStreak;
+      });
+      setLastCompletedAt(now);
+      // Pick an encouragement message
+      setShowEncouragement(encouragements[Math.floor(Math.random() * encouragements.length)]);
+      setTimeout(() => setShowEncouragement(null), 3000);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 
@@ -1822,7 +1864,25 @@ export default function Home() {
         if (q) enriched += `\n- ${q.question} → ${answer}`;
       }
     }
+    if (justMeMode) {
+      enriched += "\n\nIMPORTANT: The user wants to do EVERYTHING themselves — no AI agents. Make ALL tasks assignee 'user'. Break tasks into very concrete, small steps. This person may have executive function challenges, so: be specific, be encouraging, and make each step feel achievable.";
+    }
     return enriched;
+  };
+
+  // Convert a plan to all-user tasks when in "just me" mode
+  const convertToJustMe = (p: Plan): Plan => {
+    const convertTask = (t: Task): Task => ({
+      ...t,
+      assignee: "user",
+      agent_type: undefined,
+    });
+    return {
+      ...p,
+      nodes: p.nodes.map((n): DagNode =>
+        n.type === "task" ? convertTask(n) : { ...n, children: n.children.map(convertTask) }
+      ),
+    };
   };
 
   const handleCompile = async () => {
@@ -1865,7 +1925,8 @@ export default function Home() {
               setCompileStatus(event.text);
             } else if (event.type === "plan") {
               setCompileStartTime(null);
-              setPlan(event.plan);
+              const receivedPlan = justMeMode ? convertToJustMe(event.plan) : event.plan;
+              setPlan(receivedPlan);
               setStep("reveal");
             } else if (event.type === "subtasks") {
               // Merge subtasks into the existing plan
@@ -2112,8 +2173,9 @@ export default function Home() {
                 </p>
                 <p style={{ margin: 0 }}>
                   <strong>Designed for real humans:</strong> One task at a time. Step-by-step
-                  guidance when you need it. Big tasks broken into small, concrete actions. Built
-                  for people who find it hard to start, not just people who want to go faster.
+                  guidance when you need it. Energy-aware task ordering. Built for people
+                  with executive function challenges, not just productivity hackers. You can
+                  even turn off all agents and use it as a pure human planning tool.
                 </p>
               </div>
             </details>
@@ -2234,6 +2296,57 @@ export default function Home() {
                 Images will be analyzed to understand your project context.
               </div>
             )}
+
+            {/* Just me mode toggle */}
+            <div
+              style={{
+                marginTop: 20,
+                padding: "14px 16px",
+                borderRadius: 10,
+                background: justMeMode ? `${PRIMARY}08` : SURFACE,
+                border: `1px solid ${justMeMode ? PRIMARY + "30" : BORDER}`,
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                cursor: "pointer",
+                transition: "all 0.2s",
+              }}
+              onClick={() => setJustMeMode(!justMeMode)}
+            >
+              <div
+                style={{
+                  width: 40,
+                  height: 22,
+                  borderRadius: 11,
+                  background: justMeMode ? PRIMARY : BORDER,
+                  position: "relative",
+                  transition: "background 0.2s",
+                  flexShrink: 0,
+                }}
+              >
+                <div
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    background: "#fff",
+                    position: "absolute",
+                    top: 2,
+                    left: justMeMode ? 20 : 2,
+                    transition: "left 0.2s",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.15)",
+                  }}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: justMeMode ? PRIMARY : TEXT }}>
+                  Just me, no agents
+                </div>
+                <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
+                  All tasks stay yours. Great for personal projects, executive function support, or when you just want a good plan to follow.
+                </div>
+              </div>
+            </div>
 
             <button
               onClick={handleClarify}
@@ -2617,13 +2730,19 @@ export default function Home() {
 
         {/* ─── REVEAL ─── */}
         {step === "reveal" && plan && (() => {
-          // Find the "one thing" — first pending task for the user to act on
+          // Find the "one thing" — energy-aware task selection
           const allCurrentTasks = getAllTasks(currentNodes);
-          const oneThingTask = allCurrentTasks.find(
+          const pendingHumanTasks = allCurrentTasks.filter(
             (t) => t.status === "pending" && (t.assignee === "user" || t.assignee === "hybrid")
-          ) || allCurrentTasks.find(
-            (t) => t.status === "pending"
           );
+          // If user picked an energy level, prefer matching tasks
+          let oneThingTask: Task | undefined;
+          if (currentEnergy && pendingHumanTasks.length > 0) {
+            oneThingTask = pendingHumanTasks.find((t) => t.energy === currentEnergy)
+              || pendingHumanTasks[0];
+          } else {
+            oneThingTask = pendingHumanTasks[0] || allCurrentTasks.find((t) => t.status === "pending");
+          }
           const allDone = allCurrentTasks.every((t) => doneIds.has(t.id));
 
           return (
@@ -2671,35 +2790,151 @@ export default function Home() {
             {/* ─── ONE THING MODE ─── */}
             {revealMode === "onething" && (
               <div>
-                {/* Compact progress bar */}
-                <div
-                  style={{
-                    width: "100%",
-                    height: 4,
-                    background: BORDER,
-                    borderRadius: 2,
-                    overflow: "hidden",
-                    marginBottom: 28,
-                  }}
-                >
+                {/* Encouragement toast */}
+                {showEncouragement && (
+                  <div style={{
+                    padding: "10px 16px",
+                    borderRadius: 10,
+                    background: "#2DA44E12",
+                    border: "1px solid #2DA44E30",
+                    color: "#2DA44E",
+                    fontSize: 14,
+                    fontWeight: 500,
+                    marginBottom: 16,
+                    textAlign: "center",
+                    animation: "fadeIn 0.3s ease",
+                  }}>
+                    {showEncouragement}
+                    {streak >= 2 && streak <= 5 && (
+                      <span style={{ display: "block", fontSize: 12, marginTop: 2, opacity: 0.8 }}>
+                        {streakEncouragements[streak] || `${streak} tasks in a row!`}
+                      </span>
+                    )}
+                    {streak > 5 && (
+                      <span style={{ display: "block", fontSize: 12, marginTop: 2, opacity: 0.8 }}>
+                        {streak} tasks straight. You&apos;re unstoppable.
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Break reminder */}
+                {showBreakReminder && !showEncouragement && (
+                  <div style={{
+                    padding: "12px 16px",
+                    borderRadius: 10,
+                    background: "#D4A72C0a",
+                    border: "1px solid #D4A72C25",
+                    marginBottom: 16,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#D4A72C" }}>
+                        Nice streak! Maybe take a quick break?
+                      </div>
+                      <div style={{ fontSize: 12, color: TEXT_LIGHT }}>
+                        You&apos;ve done {streak} tasks. A short break helps you stay focused.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setShowBreakReminder(false)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: TEXT_LIGHT,
+                        fontSize: 18,
+                        cursor: "pointer",
+                        padding: "0 4px",
+                      }}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                )}
+
+                {/* Progress bar with streak dots */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
                   <div
                     style={{
-                      width: `${total > 0 ? (doneCount / total) * 100 : 0}%`,
-                      height: "100%",
-                      background: PRIMARY,
-                      borderRadius: 2,
-                      transition: "width 0.4s ease",
+                      flex: 1,
+                      height: 6,
+                      background: BORDER,
+                      borderRadius: 3,
+                      overflow: "hidden",
                     }}
-                  />
+                  >
+                    <div
+                      style={{
+                        width: `${total > 0 ? (doneCount / total) * 100 : 0}%`,
+                        height: "100%",
+                        background: PRIMARY,
+                        borderRadius: 3,
+                        transition: "width 0.4s ease",
+                      }}
+                    />
+                  </div>
+                  <span style={{ fontSize: 13, color: TEXT_LIGHT, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+                    {doneCount} of {total}
+                  </span>
                 </div>
+
+                {/* Energy check-in (only show if multiple tasks available) */}
+                {pendingHumanTasks.length > 1 && !allDone && (
+                  <div style={{
+                    marginBottom: 20,
+                    padding: "12px 16px",
+                    borderRadius: 10,
+                    background: SURFACE,
+                    border: `1px solid ${BORDER}`,
+                  }}>
+                    <div style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 8 }}>
+                      How&apos;s your energy right now?
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {([
+                        { level: "low" as Energy, label: "Low — give me something easy", color: "#2DA44E" },
+                        { level: "medium" as Energy, label: "Okay — moderate is fine", color: "#D4A72C" },
+                        { level: "high" as Energy, label: "Good — bring it on", color: "#CF522E" },
+                      ]).map(({ level, label, color }) => (
+                        <button
+                          key={level}
+                          onClick={() => setCurrentEnergy(level)}
+                          style={{
+                            flex: 1,
+                            padding: "8px 10px",
+                            borderRadius: 8,
+                            border: currentEnergy === level ? `2px solid ${color}` : `1px solid ${BORDER}`,
+                            background: currentEnergy === level ? `${color}0a` : "transparent",
+                            color: currentEnergy === level ? color : TEXT_LIGHT,
+                            fontSize: 12,
+                            fontWeight: currentEnergy === level ? 600 : 400,
+                            cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif",
+                            transition: "all 0.15s",
+                          }}
+                        >
+                          <span style={{ display: "block", width: 8, height: 8, borderRadius: "50%", background: color, margin: "0 auto 4px" }} />
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {allDone ? (
                   <div style={{ textAlign: "center", padding: "40px 0" }}>
                     <div style={{ fontSize: 48, marginBottom: 12 }}>&#x1F389;</div>
                     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>All done!</h2>
-                    <p style={{ color: "#787774", fontSize: 15 }}>
+                    <p style={{ color: "#787774", fontSize: 15, marginBottom: 4 }}>
                       Every task in your plan is complete.
                     </p>
+                    {streak > 0 && (
+                      <p style={{ color: "#2DA44E", fontSize: 14, fontWeight: 500 }}>
+                        You completed {streak} task{streak !== 1 ? "s" : ""} this session.
+                      </p>
+                    )}
                     <button
                       onClick={() => setRevealMode("project")}
                       style={{
@@ -2720,9 +2955,16 @@ export default function Home() {
                   </div>
                 ) : oneThingTask ? (
                   <div>
-                    <div style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 8 }}>
-                      Your next task:
+                    {/* Gentle, focused header */}
+                    <div style={{ fontSize: 14, color: TEXT_LIGHT, marginBottom: 4 }}>
+                      {oneThingTask.assignee === "user" ? "Focus on this one thing:" : "Next up:"}
                     </div>
+                    {oneThingTask.energy && (
+                      <div style={{ fontSize: 11, color: ENERGY_COLORS[oneThingTask.energy], marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: ENERGY_COLORS[oneThingTask.energy] }} />
+                        {oneThingTask.energy === "low" ? "Quick one" : oneThingTask.energy === "medium" ? "Moderate effort" : "This one takes focus"}
+                      </div>
+                    )}
                     <TaskCard
                       task={oneThingTask}
                       result={results[oneThingTask.id]}
@@ -2745,6 +2987,31 @@ export default function Home() {
                         }))}
                       allTasksList={allTasks}
                     />
+
+                    {/* "I'm stuck" button — opens chat with a gentler first message */}
+                    {oneThingTask.assignee === "user" && (
+                      <div style={{ marginTop: 12, textAlign: "center" }}>
+                        <button
+                          onClick={() => {
+                            // This opens the task chat if not already open
+                            const chatBtn = document.querySelector(`[data-task-chat="${oneThingTask.id}"]`) as HTMLButtonElement;
+                            if (chatBtn) chatBtn.click();
+                          }}
+                          style={{
+                            background: "none",
+                            border: `1px dashed ${BORDER}`,
+                            borderRadius: 8,
+                            padding: "8px 16px",
+                            fontSize: 12,
+                            color: TEXT_LIGHT,
+                            cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif",
+                          }}
+                        >
+                          Feeling stuck? Get help breaking this down further
+                        </button>
+                      </div>
+                    )}
 
                     {/* What's happening in the background */}
                     {runningCount > 0 && (
@@ -2829,6 +3096,11 @@ export default function Home() {
                       {runningCount > 0 && (
                         <div style={{ fontSize: 13, color: PRIMARY, fontWeight: 500 }}>
                           {runningCount === 1 ? "An agent is working on a task..." : `${runningCount} agents are working...`}
+                        </div>
+                      )}
+                      {runningCount === 0 && (
+                        <div style={{ fontSize: 13, color: TEXT_LIGHT }}>
+                          Waiting for dependencies to unlock new tasks.
                         </div>
                       )}
                     </div>
@@ -2919,6 +3191,8 @@ export default function Home() {
                     })()}
                   </div>
                 )}
+
+                <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
               </div>
             )}
 
