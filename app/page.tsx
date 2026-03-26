@@ -853,8 +853,58 @@ export default function Home() {
                 })}
               </div>
             ) : (
-              <div style={{ padding: "20px 0", color: TEXT_LIGHT, fontSize: 14, marginBottom: 24 }}>
-                No projects yet. Start one from scratch or pick a template below.
+              <div style={{ marginBottom: 32 }}>
+                {/* Hero section for first-time visitors */}
+                <div style={{
+                  padding: "28px 24px",
+                  borderRadius: 14,
+                  background: `linear-gradient(135deg, ${PRIMARY}08, ${PRIMARY}03)`,
+                  border: `1px solid ${PRIMARY}18`,
+                  marginBottom: 24,
+                }}>
+                  <h2 style={{ fontSize: 22, fontWeight: 700, color: TEXT, margin: "0 0 8px 0" }}>
+                    Describe anything. Get a smart plan.
+                  </h2>
+                  <p style={{ fontSize: 14, color: TEXT_LIGHT, lineHeight: 1.6, margin: "0 0 16px 0" }}>
+                    Tell us what you want to accomplish in plain language. We&apos;ll break it into a dependency graph of tasks,
+                    figure out what to do first, and route work to the right tools.
+                  </p>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
+                    {[
+                      { icon: "\uD83E\uDDE0", title: "Bring your own AI", desc: "Use Claude Code, ChatGPT, Gemini \u2014 tools you already pay for" },
+                      { icon: "\uD83C\uDFAF", title: "One thing at a time", desc: "Smart scheduling picks your best next task based on energy & deadlines" },
+                      { icon: "\u26A1", title: "Agents do the rest", desc: "AI handles coding, writing, research \u2014 you handle the human parts" },
+                      { icon: "\uD83D\uDDA4", title: "ADHD-friendly", desc: "Break tasks down further, focus mode, welcome-back recaps" },
+                    ].map((f) => (
+                      <div key={f.title} style={{
+                        padding: "12px 14px",
+                        borderRadius: 10,
+                        background: SURFACE,
+                        border: `1px solid ${BORDER}`,
+                      }}>
+                        <div style={{ fontSize: 18, marginBottom: 4 }}>{f.icon}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 2 }}>{f.title}</div>
+                        <div style={{ fontSize: 11, color: TEXT_LIGHT, lineHeight: 1.4 }}>{f.desc}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    onClick={startNewProject}
+                    style={{
+                      padding: "10px 24px",
+                      border: "none",
+                      borderRadius: 10,
+                      background: PRIMARY,
+                      color: "#fff",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    Start your first project &rarr;
+                  </button>
+                </div>
               </div>
             )}
 
