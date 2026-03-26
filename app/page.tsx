@@ -82,6 +82,7 @@ export default function Home() {
     return { available: [] };
   });
   const [justMeMode, setJustMeMode] = useState(false);
+  const [showInlineToolPicker, setShowInlineToolPicker] = useState(false);
   const [currentEnergy, setCurrentEnergy] = useState<Energy | null>(null);
   const [streak, setStreak] = useState(0);
   const [lastCompletedAt, setLastCompletedAt] = useState<number | null>(null);
@@ -1501,42 +1502,74 @@ export default function Home() {
                     const cap = TOOL_CAPABILITIES[tool];
                     const isSelected = userTools.available.includes(tool);
                     return (
-                      <button
-                        key={tool}
-                        onClick={() => {
-                          setUserTools((prev) => {
-                            const next = isSelected
-                              ? prev.available.filter((t) => t !== tool)
-                              : [...prev.available, tool];
-                            const newMode = next.length > 0 ? "byo" : "api";
-                            setExecutionMode(newMode);
-                            return { ...prev, available: next as UserTool[] };
-                          });
-                        }}
-                        style={{
-                          padding: "5px 10px",
-                          borderRadius: 7,
-                          border: `1.5px solid ${isSelected ? "#1967D2" : BORDER}`,
-                          background: isSelected ? "#E8F0FE" : "transparent",
-                          color: isSelected ? "#1967D2" : TEXT_LIGHT,
-                          fontSize: 12,
-                          fontWeight: isSelected ? 600 : 400,
-                          cursor: "pointer",
-                          fontFamily: "'DM Sans', sans-serif",
-                          transition: "all 0.15s",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
-                        {cap.icon} {cap.label}
-                      </button>
+                      <div key={tool} style={{ position: "relative" }}>
+                        <button
+                          onClick={() => {
+                            setUserTools((prev) => {
+                              const next = isSelected
+                                ? prev.available.filter((t) => t !== tool)
+                                : [...prev.available, tool];
+                              const newMode = next.length > 0 ? "byo" : "api";
+                              setExecutionMode(newMode);
+                              // If removing the preferred tool, clear it
+                              const newPreferred = prev.preferred === tool && isSelected ? undefined : prev.preferred;
+                              return { ...prev, available: next as UserTool[], preferred: newPreferred };
+                            });
+                          }}
+                          style={{
+                            padding: "5px 10px",
+                            borderRadius: 7,
+                            border: `1.5px solid ${isSelected ? "#1967D2" : BORDER}`,
+                            background: isSelected ? "#E8F0FE" : "transparent",
+                            color: isSelected ? "#1967D2" : TEXT_LIGHT,
+                            fontSize: 12,
+                            fontWeight: isSelected ? 600 : 400,
+                            cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif",
+                            transition: "all 0.15s",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                          }}
+                        >
+                          {cap.icon} {cap.label}
+                        </button>
+                        {isSelected && (
+                          <div style={{ fontSize: 10, color: TEXT_LIGHT, marginTop: 2, paddingLeft: 2, lineHeight: 1.3 }}>
+                            {cap.strengths.join(", ")}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
+                {userTools.available.length > 1 && (
+                  <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, color: TEXT, fontWeight: 500 }}>Default:</span>
+                    <select
+                      value={userTools.preferred || ""}
+                      onChange={(e) => {
+                        const val = e.target.value as UserTool | "";
+                        setUserTools((prev) => ({ ...prev, preferred: val || undefined }));
+                      }}
+                      style={{
+                        padding: "4px 8px", borderRadius: 6,
+                        border: `1px solid ${BORDER}`, background: SURFACE,
+                        fontSize: 12, color: TEXT, fontFamily: "'DM Sans', sans-serif",
+                        cursor: "pointer", outline: "none",
+                      }}
+                    >
+                      <option value="">Auto-route by task type</option>
+                      {userTools.available.map((tool) => {
+                        const cap = TOOL_CAPABILITIES[tool];
+                        return <option key={tool} value={tool}>{cap.icon} {cap.label}</option>;
+                      })}
+                    </select>
+                  </div>
+                )}
                 {userTools.available.length > 0 && (
                   <div style={{ marginTop: 8, fontSize: 11, color: "#1967D2", fontWeight: 500 }}>
-                    {userTools.available.length} tool{userTools.available.length !== 1 ? "s" : ""} selected — agent tasks will use your tools instead of our API
+                    {userTools.available.length} tool{userTools.available.length !== 1 ? "s" : ""} selected{userTools.preferred ? ` — default: ${TOOL_CAPABILITIES[userTools.preferred].label}` : ""} — agent tasks will use your tools instead of our API
                   </div>
                 )}
               </div>
@@ -2650,36 +2683,106 @@ export default function Home() {
                     <span>
                       <strong style={{ color: TEXT }}>{total}</strong> total
                     </span>
-                    {executionMode === "byo" && userTools.available.length > 0 && (
-                      <span
-                        style={{
-                          padding: "2px 8px", borderRadius: 5,
-                          background: "#E8F0FE", color: "#1967D2",
-                          fontSize: 11, fontWeight: 600,
-                          cursor: "pointer",
-                        }}
-                        onClick={() => { setExecutionMode("api"); setUserTools({ available: [] }); }}
-                        title="Click to switch to API mode (agents run automatically)"
-                      >
-                        Using your tools ({userTools.available.length}) — click to switch
-                      </span>
-                    )}
-                    {executionMode === "api" && userTools.available.length === 0 && (claudeCodeCount > 0 || builtinAgentCount > 0) && (
-                      <span
-                        style={{
-                          padding: "2px 8px", borderRadius: 5,
-                          background: `${PRIMARY}14`, color: PRIMARY,
-                          fontSize: 11, fontWeight: 600,
-                          cursor: "pointer",
-                        }}
-                        onClick={() => {
-                          setUserTools({ available: ["claude-code"] });
-                          setExecutionMode("byo");
-                        }}
-                        title="Switch to BYO mode — use your own AI tools"
-                      >
-                        Have your own AI tools? Switch to BYO
-                      </span>
+                    {/* Mode toggle pill */}
+                    {(claudeCodeCount > 0 || builtinAgentCount > 0) && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{
+                          display: "inline-flex", borderRadius: 20, overflow: "hidden",
+                          border: `1.5px solid ${BORDER}`, background: "#F7F6F3",
+                        }}>
+                          <button
+                            onClick={() => {
+                              setExecutionMode("byo");
+                              if (userTools.available.length === 0) setShowInlineToolPicker(true);
+                            }}
+                            style={{
+                              padding: "5px 14px", border: "none", cursor: "pointer",
+                              fontSize: 12, fontWeight: executionMode === "byo" ? 600 : 400,
+                              fontFamily: "'DM Sans', sans-serif",
+                              background: executionMode === "byo" ? "#E8F0FE" : "transparent",
+                              color: executionMode === "byo" ? "#1967D2" : TEXT_LIGHT,
+                              transition: "all 0.2s",
+                              borderRight: `1px solid ${BORDER}`,
+                            }}
+                          >
+                            BYO{executionMode === "byo" && userTools.available.length > 0 ? `: ${userTools.available.map(t => TOOL_CAPABILITIES[t].label).join(", ")}` : ""}
+                          </button>
+                          <button
+                            onClick={() => { setExecutionMode("api"); setShowInlineToolPicker(false); }}
+                            style={{
+                              padding: "5px 14px", border: "none", cursor: "pointer",
+                              fontSize: 12, fontWeight: executionMode === "api" ? 600 : 400,
+                              fontFamily: "'DM Sans', sans-serif",
+                              background: executionMode === "api" ? `${PRIMARY}18` : "transparent",
+                              color: executionMode === "api" ? PRIMARY : TEXT_LIGHT,
+                              transition: "all 0.2s",
+                            }}
+                          >
+                            Auto: Using our API
+                          </button>
+                        </div>
+                        {executionMode === "byo" && userTools.available.length > 0 && !showInlineToolPicker && (
+                          <button
+                            onClick={() => setShowInlineToolPicker(true)}
+                            style={{
+                              background: "none", border: "none", color: TEXT_LIGHT,
+                              fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                              textDecoration: "underline", textDecorationStyle: "dotted" as const,
+                              padding: 0, textAlign: "left",
+                            }}
+                          >
+                            Change tools
+                          </button>
+                        )}
+                        {showInlineToolPicker && executionMode === "byo" && (
+                          <div style={{
+                            display: "flex", flexWrap: "wrap", gap: 4, padding: "6px 0",
+                          }}>
+                            {(Object.keys(TOOL_CAPABILITIES) as UserTool[]).map((tool) => {
+                              const cap = TOOL_CAPABILITIES[tool];
+                              const isSelected = userTools.available.includes(tool);
+                              return (
+                                <button
+                                  key={tool}
+                                  onClick={() => {
+                                    setUserTools((prev) => {
+                                      const next = isSelected
+                                        ? prev.available.filter((t) => t !== tool)
+                                        : [...prev.available, tool];
+                                      if (next.length === 0) { setExecutionMode("api"); setShowInlineToolPicker(false); }
+                                      const newPreferred = prev.preferred === tool && isSelected ? undefined : prev.preferred;
+                                      return { ...prev, available: next as UserTool[], preferred: newPreferred };
+                                    });
+                                  }}
+                                  style={{
+                                    padding: "3px 8px", borderRadius: 6,
+                                    border: `1px solid ${isSelected ? "#1967D2" : BORDER}`,
+                                    background: isSelected ? "#E8F0FE" : "transparent",
+                                    color: isSelected ? "#1967D2" : TEXT_LIGHT,
+                                    fontSize: 11, fontWeight: isSelected ? 600 : 400,
+                                    cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                                    transition: "all 0.15s",
+                                    display: "inline-flex", alignItems: "center", gap: 3,
+                                  }}
+                                  title={cap.strengths.join(", ")}
+                                >
+                                  {cap.icon} {cap.label}
+                                </button>
+                              );
+                            })}
+                            <button
+                              onClick={() => setShowInlineToolPicker(false)}
+                              style={{
+                                background: "none", border: "none", color: TEXT_LIGHT,
+                                fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                                padding: "3px 4px",
+                              }}
+                            >
+                              Done
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
