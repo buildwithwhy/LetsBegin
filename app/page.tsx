@@ -494,6 +494,15 @@ export default function Home() {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
   }, []);
 
+  const handleReopen = useCallback((id: string) => {
+    unmarkDone(id);
+    const task = allTasks.find((t) => t.id === id);
+    // Show a brief undo-style toast confirming the reopen
+    setUndoToast({ id: "", title: `"${task?.title || id}" reopened` });
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = setTimeout(() => setUndoToast(null), 3000);
+  }, [unmarkDone, allTasks]);
+
   const addNewTask = useCallback((title: string, description: string, assignee: Assignee, energy: Energy, deadline?: string) => {
     setPlan((prev) => {
       if (!prev) return prev;
@@ -4492,6 +4501,8 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                       onDecompose={handleDecompose}
                       doneIds={doneIds}
                       currentNodes={currentNodes}
+                      onReopen={handleReopen}
+                      byoKeys={byoKeys}
                     />
 
                     {/* "I'm stuck" button — opens chat with a gentler first message */}
@@ -5137,6 +5148,8 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                   onDecompose={handleDecompose}
                   doneIds={doneIds}
                   currentNodes={currentNodes}
+                  onReopen={handleReopen}
+                  byoKeys={byoKeys}
                 />
               </div>
             )}
@@ -5163,23 +5176,25 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
           zIndex: 1000,
           boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
         }}>
-          <span>Task completed.</span>
-          <button
-            onClick={() => unmarkDone(undoToast.id)}
-            style={{
-              background: "none",
-              border: "none",
-              color: PRIMARY,
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: "pointer",
-              fontFamily: "'DM Sans', sans-serif",
-              textDecoration: "underline",
-              padding: 0,
-            }}
-          >
-            Undo
-          </button>
+          <span>{undoToast.id ? "Task completed." : undoToast.title}</span>
+          {undoToast.id && (
+            <button
+              onClick={() => unmarkDone(undoToast.id)}
+              style={{
+                background: "none",
+                border: "none",
+                color: PRIMARY,
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "'DM Sans', sans-serif",
+                textDecoration: "underline",
+                padding: 0,
+              }}
+            >
+              Undo
+            </button>
+          )}
         </div>
       )}
     </div>
