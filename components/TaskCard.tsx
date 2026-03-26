@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, ENERGY_COLORS } from "@/lib/styles";
-import { ExecutionMode, PriorResult, TaskRouting, UserToolConfig, routeTask } from "@/lib/styles";
+import { ExecutionMode, PriorResult, TaskRouting, UserToolConfig, UserTool, TOOL_CAPABILITIES, routeTask } from "@/lib/styles";
 import { Task, Subtask, DagNode, Energy, Assignee, AgentType, ActivityEvent, TaskCategory } from "@/lib/dag";
 import { AgentResult, AgentStep } from "@/hooks/useAgentExecutor";
 import { AgentPanel } from "@/components/AgentPanel";
@@ -149,6 +149,8 @@ export function TaskCard({
   const [editingDeadline, setEditingDeadline] = useState(false);
   const [showDecompose, setShowDecompose] = useState(false);
   const [decomposing, setDecomposing] = useState(false);
+  const [toolOverride, setToolOverride] = useState<UserTool | null>(null);
+  const [showToolPicker, setShowToolPicker] = useState(false);
 
   // ADHD Task Timer
   const [timerStartedAt, setTimerStartedAt] = useState<number | null>(null);
@@ -201,6 +203,20 @@ export function TaskCard({
   const taskRouting = userTools && userTools.available.length > 0
     ? routeTask(inferTaskType(task), userTools)
     : undefined;
+
+  // Apply tool override if user selected a different tool
+  const effectiveRouting: TaskRouting | undefined = toolOverride && userTools
+    ? (() => {
+        const cap = TOOL_CAPABILITIES[toolOverride];
+        return {
+          method: cap.isApi ? "api" as const : "byo" as const,
+          tool: toolOverride,
+          label: cap.label,
+          icon: cap.icon,
+          promptStyle: cap.promptStyle,
+        };
+      })()
+    : taskRouting;
 
   const agentLabel = task.agent_type === "claude-code" ? "Claude Code"
     : task.agent_type === "custom" ? "Custom Agent" : "Agent";
@@ -587,13 +603,99 @@ export function TaskCard({
         </div>
       )}
       {isPending && !result && task.assignee === "agent" && executionMode === "byo" && (
-        <ByoAgentPanel
-          task={task}
-          projectContext={projectSummary}
-          priorResults={priorResults}
-          onComplete={onMarkDone}
-          routing={taskRouting}
-        />
+        <>
+          {userTools && userTools.available.length > 1 && (
+            <div style={{ position: "relative", marginBottom: 8 }}>
+              <button
+                onClick={() => setShowToolPicker(!showToolPicker)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "3px 10px",
+                  borderRadius: 99,
+                  border: `1px solid ${toolOverride ? PRIMARY : BORDER}`,
+                  background: toolOverride ? `${PRIMARY}12` : "transparent",
+                  color: toolOverride ? PRIMARY : TEXT_LIGHT,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                {effectiveRouting?.icon} {effectiveRouting?.label}
+                <span style={{ fontSize: 9, marginLeft: 2 }}>{showToolPicker ? "\u25B2" : "\u25BC"}</span>
+              </button>
+              {showToolPicker && (
+                <div style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  marginTop: 4,
+                  background: SURFACE,
+                  border: `1px solid ${BORDER}`,
+                  borderRadius: 8,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                  zIndex: 10,
+                  minWidth: 160,
+                  overflow: "hidden",
+                }}>
+                  {/* Auto option to reset */}
+                  <div
+                    onClick={() => { setToolOverride(null); setShowToolPicker(false); }}
+                    style={{
+                      padding: "7px 12px",
+                      fontSize: 11,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      background: !toolOverride ? `${PRIMARY}08` : "transparent",
+                      color: !toolOverride ? PRIMARY : TEXT,
+                      fontWeight: !toolOverride ? 600 : 400,
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    {taskRouting?.icon} {taskRouting?.label} <span style={{ color: TEXT_LIGHT, fontSize: 10 }}>(auto)</span>
+                  </div>
+                  {userTools.available
+                    .filter((t) => t !== taskRouting?.tool)
+                    .map((tool) => {
+                      const cap = TOOL_CAPABILITIES[tool];
+                      const isSelected = toolOverride === tool;
+                      return (
+                        <div
+                          key={tool}
+                          onClick={() => { setToolOverride(tool); setShowToolPicker(false); }}
+                          style={{
+                            padding: "7px 12px",
+                            fontSize: 11,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            background: isSelected ? `${PRIMARY}08` : "transparent",
+                            color: isSelected ? PRIMARY : TEXT,
+                            fontWeight: isSelected ? 600 : 400,
+                            fontFamily: "'DM Sans', sans-serif",
+                          }}
+                        >
+                          {cap.icon} {cap.label}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          )}
+          <ByoAgentPanel
+            task={task}
+            projectContext={projectSummary}
+            priorResults={priorResults}
+            onComplete={onMarkDone}
+            routing={effectiveRouting}
+          />
+        </>
       )}
       {isPending && !result && task.assignee === "hybrid" && executionMode === "api" && (
         <button
@@ -614,13 +716,98 @@ export function TaskCard({
         </button>
       )}
       {isPending && !result && task.assignee === "hybrid" && executionMode === "byo" && (
-        <ByoAgentPanel
-          task={task}
-          projectContext={projectSummary}
-          priorResults={priorResults}
-          onComplete={onMarkDone}
-          routing={taskRouting}
-        />
+        <>
+          {userTools && userTools.available.length > 1 && (
+            <div style={{ position: "relative", marginBottom: 8 }}>
+              <button
+                onClick={() => setShowToolPicker(!showToolPicker)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "3px 10px",
+                  borderRadius: 99,
+                  border: `1px solid ${toolOverride ? PRIMARY : BORDER}`,
+                  background: toolOverride ? `${PRIMARY}12` : "transparent",
+                  color: toolOverride ? PRIMARY : TEXT_LIGHT,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                {effectiveRouting?.icon} {effectiveRouting?.label}
+                <span style={{ fontSize: 9, marginLeft: 2 }}>{showToolPicker ? "\u25B2" : "\u25BC"}</span>
+              </button>
+              {showToolPicker && (
+                <div style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  marginTop: 4,
+                  background: SURFACE,
+                  border: `1px solid ${BORDER}`,
+                  borderRadius: 8,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                  zIndex: 10,
+                  minWidth: 160,
+                  overflow: "hidden",
+                }}>
+                  <div
+                    onClick={() => { setToolOverride(null); setShowToolPicker(false); }}
+                    style={{
+                      padding: "7px 12px",
+                      fontSize: 11,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      background: !toolOverride ? `${PRIMARY}08` : "transparent",
+                      color: !toolOverride ? PRIMARY : TEXT,
+                      fontWeight: !toolOverride ? 600 : 400,
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    {taskRouting?.icon} {taskRouting?.label} <span style={{ color: TEXT_LIGHT, fontSize: 10 }}>(auto)</span>
+                  </div>
+                  {userTools.available
+                    .filter((t) => t !== taskRouting?.tool)
+                    .map((tool) => {
+                      const cap = TOOL_CAPABILITIES[tool];
+                      const isSelected = toolOverride === tool;
+                      return (
+                        <div
+                          key={tool}
+                          onClick={() => { setToolOverride(tool); setShowToolPicker(false); }}
+                          style={{
+                            padding: "7px 12px",
+                            fontSize: 11,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            background: isSelected ? `${PRIMARY}08` : "transparent",
+                            color: isSelected ? PRIMARY : TEXT,
+                            fontWeight: isSelected ? 600 : 400,
+                            fontFamily: "'DM Sans', sans-serif",
+                          }}
+                        >
+                          {cap.icon} {cap.label}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          )}
+          <ByoAgentPanel
+            task={task}
+            projectContext={projectSummary}
+            priorResults={priorResults}
+            onComplete={onMarkDone}
+            routing={effectiveRouting}
+          />
+        </>
       )}
       {isPending && !result && task.assignee === "user" && (
         <div>
