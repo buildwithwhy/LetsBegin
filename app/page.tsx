@@ -1,1418 +1,48 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   type Plan,
   type DagNode,
   type Task,
-  type Subtask,
   type Energy,
   type Assignee,
+  type AgentType,
+  type ActivityEvent,
+  type TaskCategory,
+  type ProjectPriority,
   getAllTasks,
   computeUnlocked,
+  scoreTasks,
 } from "@/lib/dag";
-import { useAgentExecutor, type AgentResult, type AgentStep } from "@/hooks/useAgentExecutor";
+import { useAgentExecutor } from "@/hooks/useAgentExecutor";
 import { useAuth } from "@/hooks/useAuth";
 import { usePlanStorage } from "@/hooks/usePlanStorage";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
-
-const PRIMARY = "#6366A0";
-const BG = "#F7F6F3";
-const BORDER = "#E5E4E0";
-const TEXT = "#37352F";
-const TEXT_LIGHT = "#9B9A97";
-const SURFACE = "#FFFFFF";
-const ENERGY_COLORS: Record<Energy, string> = {
-  high: "#CF522E",
-  medium: "#D4A72C",
-  low: "#2DA44E",
-};
-
-// ─── Header ───
-
-function Header({
-  plan,
-  doneCount,
-  total,
-  running,
-  runningCount,
-  userEmail,
-  onSignOut,
-}: {
-  plan: Plan | null;
-  doneCount: number;
-  total: number;
-  running: string | null;
-  runningCount: number;
-  userEmail?: string;
-  onSignOut?: () => void;
-}) {
-  return (
-    <header
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "16px 32px",
-        borderBottom: `1px solid ${BORDER}`,
-        background: SURFACE,
-        position: "sticky",
-        top: 0,
-        zIndex: 100,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-        <span style={{ fontSize: 22, fontWeight: 700, color: PRIMARY }}>LetsBegin</span>
-        {plan && (
-          <span style={{ fontSize: 14, color: "#787774", fontWeight: 500 }}>
-            {plan.project_title}
-          </span>
-        )}
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-        {plan && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div
-              style={{
-                width: 120,
-                height: 6,
-                background: BORDER,
-                borderRadius: 3,
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  width: `${total > 0 ? (doneCount / total) * 100 : 0}%`,
-                  height: "100%",
-                  background: PRIMARY,
-                  borderRadius: 3,
-                  transition: "width 0.3s ease",
-                }}
-              />
-            </div>
-            <span style={{ fontSize: 13, color: TEXT_LIGHT }}>
-              {doneCount}/{total}
-            </span>
-          </div>
-        )}
-        {running && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: PRIMARY,
-                display: "inline-block",
-                animation: "pulse 1.5s ease-in-out infinite",
-              }}
-            />
-            <span style={{ fontSize: 12, color: PRIMARY, fontWeight: 500 }}>
-              {runningCount > 1 ? `${runningCount} agents running` : "agent running"}
-            </span>
-          </div>
-        )}
-        {userEmail && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, color: TEXT_LIGHT }}>{userEmail}</span>
-            {onSignOut && (
-              <button
-                onClick={onSignOut}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: TEXT_LIGHT,
-                  fontSize: 12,
-                  cursor: "pointer",
-                  textDecoration: "underline",
-                  fontFamily: "'DM Sans', sans-serif",
-                }}
-              >
-                Sign out
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
-    </header>
-  );
-}
-
-// ─── ThinkingTerminal ───
-
-function ThinkingTerminal({ text }: { text: string }) {
-  const ref = useRef<HTMLPreElement>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [text]);
-
-  return (
-    <pre
-      ref={ref}
-      style={{
-        background: "#1C1C1E",
-        color: "#8FBC8F",
-        fontFamily: "'DM Mono', 'Fira Code', monospace",
-        fontSize: 13,
-        lineHeight: 1.6,
-        padding: 20,
-        borderRadius: 12,
-        maxHeight: 320,
-        overflow: "auto",
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-      }}
-    >
-      {text}
-      <span style={{ animation: "blink 1s step-end infinite" }}>_</span>
-      <style>{`@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }`}</style>
-    </pre>
-  );
-}
-
-// ─── AgentPanel ───
-
-function AgentPanel({
-  result,
-  onApprove,
-  onRegenerate,
-  showApprove,
-}: {
-  result: AgentResult;
-  onApprove?: () => void;
-  onRegenerate?: () => void;
-  showApprove?: boolean;
-}) {
-  const isClaude = result.model === "claude-sonnet";
-  const badgeBg = isClaude ? "#FDF6EE" : "#F0EFEB";
-  const badgeColor = isClaude ? "#C4841D" : PRIMARY;
-  const badgeLabel = isClaude ? "Claude Sonnet" : "Gemini Flash";
-
-  return (
-    <div style={{ marginTop: 12 }}>
-      <div
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "4px 10px",
-          borderRadius: 6,
-          background: badgeBg,
-          color: badgeColor,
-          fontSize: 12,
-          fontWeight: 600,
-          marginBottom: 8,
-        }}
-      >
-        {badgeLabel}
-      </div>
-      <div
-        style={{
-          background: "#1C1C1E",
-          borderRadius: 10,
-          padding: 14,
-          maxHeight: 200,
-          overflow: "auto",
-          fontSize: 12,
-          fontFamily: "'DM Mono', 'Fira Code', monospace",
-          lineHeight: 1.5,
-        }}
-      >
-        {result.steps.map((step, i) => (
-          <StepLine key={i} step={step} />
-        ))}
-        {!result.done && (
-          <span style={{ color: "#8FBC8F", animation: "blink 1s step-end infinite" }}>_</span>
-        )}
-      </div>
-      {result.steps
-        .filter((s): s is AgentStep & { type: "output" } => s.type === "output")
-        .map((s, i) => (
-          <div
-            key={i}
-            style={{
-              marginTop: 8,
-              borderRadius: 8,
-              overflow: "hidden",
-              border: s.outputType === "code" ? "none" : `1px solid ${BORDER}`,
-            }}
-          >
-            {s.outputType === "code" ? (
-              <div>
-                {s.filename && (
-                  <div
-                    style={{
-                      background: "#1C1C1E",
-                      padding: "6px 12px",
-                      fontSize: 11,
-                      color: TEXT_LIGHT,
-                      borderBottom: "1px solid #2C2C2E",
-                    }}
-                  >
-                    {s.filename}
-                  </div>
-                )}
-                <pre
-                  style={{
-                    background: "#1C1C1E",
-                    color: "#e0e0e0",
-                    padding: 14,
-                    margin: 0,
-                    fontSize: 12,
-                    fontFamily: "'DM Mono', 'Fira Code', monospace",
-                    overflow: "auto",
-                    whiteSpace: "pre-wrap",
-                  }}
-                >
-                  {s.content}
-                </pre>
-              </div>
-            ) : (
-              <div
-                style={{
-                  background: SURFACE,
-                  padding: 14,
-                  fontSize: 13,
-                  lineHeight: 1.6,
-                  whiteSpace: "pre-wrap",
-                }}
-              >
-                <SimpleMarkdown text={s.content} color={TEXT} />
-              </div>
-            )}
-          </div>
-        ))}
-      {result.error && (
-        <div style={{ color: "#CF522E", fontSize: 12, marginTop: 8 }}>Error: {result.error}</div>
-      )}
-      {showApprove && result.done && onApprove && (
-        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-          <button
-            onClick={onApprove}
-            style={{
-              padding: "8px 18px",
-              border: "none",
-              borderRadius: 8,
-              background: "#C4841D",
-              color: "#fff",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
-              fontFamily: "'DM Sans', sans-serif",
-            }}
-          >
-            Looks good, continue &rarr;
-          </button>
-          {onRegenerate && (
-            <button
-              onClick={onRegenerate}
-              style={{
-                padding: "8px 14px",
-                border: `1px solid ${BORDER}`,
-                borderRadius: 8,
-                background: "transparent",
-                color: TEXT_LIGHT,
-                fontSize: 13,
-                cursor: "pointer",
-                fontFamily: "'DM Sans', sans-serif",
-              }}
-            >
-              Regenerate
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function StepLine({ step }: { step: AgentStep }) {
-  if (step.type === "thinking") {
-    return <div style={{ color: "#8FBC8F" }}>{step.text}</div>;
-  }
-  if (step.type === "tool_call") {
-    return (
-      <div style={{ color: "#D4A72C" }}>
-        &gt; {step.summary}
-      </div>
-    );
-  }
-  return null;
-}
-
-// ─── SimpleMarkdown ───
-
-function SimpleMarkdown({ text, color }: { text: string; color?: string }) {
-  const lines = text.split("\n");
-  return (
-    <span>
-      {lines.map((line, li) => {
-        const isNumberedList = /^\d+\.\s/.test(line);
-        const isBullet = /^[-*]\s/.test(line);
-        const content = isNumberedList || isBullet ? line.replace(/^(\d+\.\s|[-*]\s)/, "") : line;
-        const prefix = isNumberedList ? line.match(/^(\d+\.)\s/)?.[1] + " " : isBullet ? "\u2022 " : "";
-
-        const rendered = inlineMarkdown(content, color);
-
-        return (
-          <span key={li}>
-            {li > 0 && <br />}
-            {(isNumberedList || isBullet) && (
-              <span style={{ fontWeight: 500 }}>{prefix}</span>
-            )}
-            {rendered}
-          </span>
-        );
-      })}
-    </span>
-  );
-}
-
-function inlineMarkdown(text: string, color?: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  // Match **bold**, *italic*, `code`, and [text](url)
-  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|\[(.+?)\]\((.+?)\))/g;
-  let lastIndex = 0;
-  let match;
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
-    }
-    if (match[2]) {
-      // **bold**
-      parts.push(<strong key={match.index}>{match[2]}</strong>);
-    } else if (match[3]) {
-      // *italic*
-      parts.push(<em key={match.index}>{match[3]}</em>);
-    } else if (match[4]) {
-      // `code`
-      parts.push(
-        <code
-          key={match.index}
-          style={{
-            background: color === "#fff" ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.06)",
-            padding: "1px 4px",
-            borderRadius: 3,
-            fontSize: "0.9em",
-          }}
-        >
-          {match[4]}
-        </code>
-      );
-    } else if (match[5] && match[6]) {
-      // [text](url)
-      parts.push(
-        <a
-          key={match.index}
-          href={match[6]}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: color === "#fff" ? "#c4b5fd" : PRIMARY, textDecoration: "underline" }}
-        >
-          {match[5]}
-        </a>
-      );
-    }
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
-
-  return parts;
-}
-
-// ─── TaskChat ───
-
-interface PriorResult {
-  title: string;
-  assignee: string;
-  output: string;
-}
-
-function TaskChat({
-  task,
-  projectSummary,
-  priorResults,
-}: {
-  task: Task;
-  projectSummary: string;
-  priorResults: PriorResult[];
-}) {
-  const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
-  const [input, setInput] = useState("");
-  const [streaming, setStreaming] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const send = async () => {
-    if (!input.trim() || streaming) return;
-    const userMsg = { role: "user" as const, content: input.trim() };
-    const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
-    setInput("");
-    setStreaming(true);
-
-    const assistantMsg = { role: "assistant" as const, content: "" };
-    setMessages([...newMessages, assistantMsg]);
-
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          taskTitle: task.title,
-          taskDescription: task.description,
-          projectSummary,
-          messages: newMessages,
-          priorResults,
-          subtasks: task.subtasks?.map((st) => ({ title: st.title, assignee: st.assignee })),
-        }),
-      });
-
-      const reader = res.body?.getReader();
-      if (!reader) return;
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let accumulated = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const event = JSON.parse(line);
-            if (event.type === "text") {
-              accumulated += event.text;
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { role: "assistant", content: accumulated };
-                return updated;
-              });
-            }
-          } catch {
-            // skip
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Chat error:", err);
-    } finally {
-      setStreaming(false);
-    }
-  };
-
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        style={{
-          padding: "5px 12px",
-          border: `1px solid ${BORDER}`,
-          borderRadius: 6,
-          background: "transparent",
-          color: TEXT_LIGHT,
-          fontSize: 12,
-          cursor: "pointer",
-          fontFamily: "'DM Sans', sans-serif",
-          marginTop: 4,
-        }}
-      >
-        Help me with this
-      </button>
-    );
-  }
-
-  return (
-    <div
-      style={{
-        marginTop: 12,
-        border: `1px solid ${BORDER}`,
-        borderRadius: 10,
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "8px 12px",
-          background: "#F0EFEB",
-          borderBottom: `1px solid ${BORDER}`,
-        }}
-      >
-        <span style={{ fontSize: 12, fontWeight: 600, color: PRIMARY }}>Task guide</span>
-        <button
-          onClick={() => setOpen(false)}
-          style={{
-            background: "none",
-            border: "none",
-            color: TEXT_LIGHT,
-            cursor: "pointer",
-            fontSize: 16,
-            padding: 0,
-            lineHeight: 1,
-          }}
-        >
-          &times;
-        </button>
-      </div>
-      <div
-        style={{
-          maxHeight: 260,
-          overflow: "auto",
-          padding: 12,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-        }}
-      >
-        {messages.length === 0 && (
-          <div style={{ fontSize: 12, color: TEXT_LIGHT, textAlign: "center", padding: 12 }}>
-            Ask anything about this task — how to start, what it means, step-by-step help.
-          </div>
-        )}
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            style={{
-              alignSelf: m.role === "user" ? "flex-end" : "flex-start",
-              maxWidth: "85%",
-              padding: "8px 12px",
-              borderRadius: 10,
-              background: m.role === "user" ? PRIMARY : "#EDECE9",
-              color: m.role === "user" ? "#fff" : TEXT,
-              fontSize: 13,
-              lineHeight: 1.5,
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {m.role === "assistant" ? (
-              <SimpleMarkdown text={m.content} color={TEXT} />
-            ) : (
-              m.content
-            )}
-            {streaming && i === messages.length - 1 && m.role === "assistant" && (
-              <span style={{ animation: "blink 1s step-end infinite" }}>_</span>
-            )}
-          </div>
-        ))}
-        <div ref={chatEndRef} />
-      </div>
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          padding: "8px 12px",
-          borderTop: `1px solid ${BORDER}`,
-        }}
-      >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
-          placeholder="How do I start this?"
-          style={{
-            flex: 1,
-            padding: "6px 10px",
-            fontSize: 13,
-            fontFamily: "'DM Sans', sans-serif",
-            borderRadius: 6,
-            border: `1px solid ${BORDER}`,
-            outline: "none",
-          }}
-        />
-        <button
-          onClick={send}
-          disabled={!input.trim() || streaming}
-          style={{
-            padding: "6px 14px",
-            border: "none",
-            borderRadius: 6,
-            background: !input.trim() || streaming ? "#ccc" : PRIMARY,
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: !input.trim() || streaming ? "not-allowed" : "pointer",
-            fontFamily: "'DM Sans', sans-serif",
-          }}
-        >
-          Send
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── SubtaskList ───
-
-function SubtaskList({
-  subtasks,
-  autoExpand = false,
-  doneSubtaskIds,
-  onToggleSubtask,
-}: {
-  subtasks: Subtask[];
-  autoExpand?: boolean;
-  doneSubtaskIds: Set<string>;
-  onToggleSubtask: (subtaskId: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(autoExpand);
-  const doneCount = subtasks.filter((st) => doneSubtaskIds.has(st.id)).length;
-
-  // Group parallel subtasks together
-  const rendered = new Set<string>();
-  const groups: (Subtask | Subtask[])[] = [];
-  for (const st of subtasks) {
-    if (rendered.has(st.id)) continue;
-    if (st.parallel_with && st.parallel_with.length > 0) {
-      const parallel = [st, ...subtasks.filter((s) => st.parallel_with?.includes(s.id) && !rendered.has(s.id))];
-      parallel.forEach((p) => rendered.add(p.id));
-      groups.push(parallel);
-    } else {
-      rendered.add(st.id);
-      groups.push(st);
-    }
-  }
-
-  return (
-    <div style={{ marginBottom: 10 }}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          background: "none",
-          border: "none",
-          padding: 0,
-          fontSize: 12,
-          color: PRIMARY,
-          cursor: "pointer",
-          fontWeight: 500,
-          fontFamily: "'DM Sans', sans-serif",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-        }}
-      >
-        {expanded ? "\u25BC" : "\u25B6"} {subtasks.length} steps
-        {doneCount > 0 && (
-          <span style={{ color: "#2DA44E", fontWeight: 400 }}>
-            ({doneCount}/{subtasks.length} done)
-          </span>
-        )}
-      </button>
-      {expanded && (
-        <div style={{ marginTop: 8, paddingLeft: 2 }}>
-          {groups.map((group, gi) => {
-            if (Array.isArray(group)) {
-              return (
-                <div key={gi}>
-                  <div style={{ fontSize: 10, color: "#B0AFA8", marginBottom: 4, marginTop: gi > 0 ? 8 : 0, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                    Can do at the same time:
-                  </div>
-                  <div style={{ borderLeft: `2px solid ${PRIMARY}22`, paddingLeft: 10, marginBottom: 6 }}>
-                    {group.map((st) => (
-                      <SubtaskItem key={st.id} st={st} done={doneSubtaskIds.has(st.id)} onToggle={onToggleSubtask} />
-                    ))}
-                  </div>
-                </div>
-              );
-            }
-            return <SubtaskItem key={group.id} st={group} done={doneSubtaskIds.has(group.id)} onToggle={onToggleSubtask} />;
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SubtaskItem({ st, done, onToggle }: { st: Subtask; done: boolean; onToggle: (id: string) => void }) {
-  const isAgent = st.assignee === "agent";
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 8,
-        alignItems: "flex-start",
-        marginBottom: 6,
-        fontSize: 12,
-        color: done ? "#bbb" : "#666",
-        lineHeight: 1.5,
-        opacity: done ? 0.6 : 1,
-      }}
-    >
-      <button
-        onClick={() => onToggle(st.id)}
-        style={{
-          minWidth: 18,
-          height: 18,
-          borderRadius: 4,
-          border: done ? "none" : `1.5px solid ${BORDER}`,
-          background: done ? "#2DA44E" : "transparent",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 10,
-          color: done ? "#fff" : "#bbb",
-          flexShrink: 0,
-          marginTop: 1,
-          cursor: "pointer",
-          padding: 0,
-        }}
-      >
-        {done ? "\u2713" : ""}
-      </button>
-      <span style={{ textDecoration: done ? "line-through" : "none", flex: 1 }}>
-        {st.title}
-      </span>
-      <span
-        style={{
-          fontSize: 9,
-          fontWeight: 600,
-          padding: "1px 5px",
-          borderRadius: 4,
-          background: isAgent ? `${PRIMARY}14` : BORDER,
-          color: isAgent ? PRIMARY : TEXT_LIGHT,
-          flexShrink: 0,
-          marginTop: 2,
-        }}
-      >
-        {isAgent ? "AI" : "You"}
-      </span>
-    </div>
-  );
-}
-
-// ─── TaskCard ───
-
-function TaskCard({
-  task,
-  result,
-  onMarkDone,
-  onRunAgent,
-  projectSummary,
-  autoExpandSubtasks = false,
-  doneSubtaskIds,
-  onToggleSubtask,
-  priorResults,
-  allTasksList,
-}: {
-  task: Task;
-  result?: AgentResult;
-  onMarkDone: (id: string) => void;
-  onRunAgent: (task: Task, force?: boolean) => void;
-  projectSummary: string;
-  autoExpandSubtasks?: boolean;
-  doneSubtaskIds: Set<string>;
-  onToggleSubtask: (id: string) => void;
-  priorResults: PriorResult[];
-  allTasksList?: Task[];
-}) {
-  const isLocked = task.status === "locked";
-  const isDone = task.status === "done";
-  const isPending = task.status === "pending";
-  const [doneExpanded, setDoneExpanded] = useState(false);
-
-  const assigneeConfig = {
-    agent: { icon: "\u26A1", label: "Agent", bg: `${PRIMARY}18`, color: PRIMARY },
-    user: { icon: "\uD83D\uDC64", label: "You", bg: BORDER, color: "#787774" },
-    hybrid: { icon: "\uD83E\uDD1D", label: "Review", bg: "#C4841D14", color: "#C4841D" },
-  }[task.assignee];
-
-  // Collapsed done task — just shows title + checkmark
-  if (isDone && !doneExpanded) {
-    return (
-      <div
-        onClick={() => setDoneExpanded(true)}
-        style={{
-          background: SURFACE,
-          borderRadius: 10,
-          padding: "10px 14px",
-          border: `1px solid ${BORDER}`,
-          opacity: 0.55,
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
-        <span style={{ color: "#2DA44E", fontSize: 14 }}>{"\u2713"}</span>
-        <span style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 4,
-          padding: "2px 6px",
-          borderRadius: 5,
-          background: assigneeConfig.bg,
-          color: assigneeConfig.color,
-          fontSize: 10,
-          fontWeight: 600,
-        }}>
-          {assigneeConfig.icon}
-        </span>
-        <span style={{ fontSize: 13, color: TEXT_LIGHT, textDecoration: "line-through" }}>{task.title}</span>
-        <span style={{ marginLeft: "auto", fontSize: 11, color: "#B0AFA8" }}>{"\u25B6"}</span>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      style={{
-        background: SURFACE,
-        borderRadius: 12,
-        padding: 18,
-        border: `1px solid ${BORDER}`,
-        opacity: isLocked ? 0.32 : isDone ? 0.55 : 1,
-        transition: "opacity 0.2s",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              padding: "3px 8px",
-              borderRadius: 6,
-              background: assigneeConfig.bg,
-              color: assigneeConfig.color,
-              fontSize: 11,
-              fontWeight: 600,
-            }}
-          >
-            {assigneeConfig.icon} {assigneeConfig.label}
-          </span>
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              padding: "2px 7px",
-              borderRadius: 5,
-              background: `${ENERGY_COLORS[task.energy]}14`,
-              color: ENERGY_COLORS[task.energy],
-              fontSize: 10,
-              fontWeight: 600,
-              textTransform: "capitalize",
-            }}
-          >
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: ENERGY_COLORS[task.energy] }} />
-            {task.energy}
-          </span>
-        </div>
-        {isLocked && <span style={{ fontSize: 14 }}>&#x1F512;</span>}
-        {isDone && <span onClick={() => setDoneExpanded(false)} style={{ fontSize: 14, color: "#2DA44E", cursor: "pointer" }}>{"\u2713 \u25BC"}</span>}
-      </div>
-      <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{task.title}</div>
-      <div style={{ fontSize: 13, color: "#787774", lineHeight: 1.5, marginBottom: 8 }}>
-        {task.description}
-      </div>
-
-      {task.depends_on.length > 0 && isLocked && (
-        <div style={{ fontSize: 11, color: TEXT_LIGHT, marginBottom: 8 }}>
-          <span style={{ opacity: 0.6 }}>&#x1F517;</span>{" "}
-          Waiting on:{" "}
-          {task.depends_on.map((depId, i) => {
-            const depTask = allTasksList?.find((t) => t.id === depId);
-            const depName = depTask ? depTask.title : depId;
-            return (
-              <span key={depId}>
-                {i > 0 && ", "}
-                <span style={{ fontWeight: 500 }}>{depName}</span>
-              </span>
-            );
-          })}
-        </div>
-      )}
-
-      {task.subtasks && task.subtasks.length > 0 && isPending && (
-        <SubtaskList
-          subtasks={task.subtasks}
-          autoExpand={autoExpandSubtasks}
-          doneSubtaskIds={doneSubtaskIds}
-          onToggleSubtask={onToggleSubtask}
-        />
-      )}
-
-      {isPending && !result && task.assignee === "agent" && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PRIMARY }}>
-          <span style={{ width: 8, height: 8, borderRadius: "50%", background: PRIMARY, animation: "pulse 1.5s ease-in-out infinite" }} />
-          Running automatically...
-        </div>
-      )}
-      {isPending && !result && task.assignee === "hybrid" && (
-        <button
-          onClick={() => onRunAgent(task)}
-          style={{
-            padding: "7px 16px",
-            border: "none",
-            borderRadius: 8,
-            background: PRIMARY,
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "'DM Sans', sans-serif",
-          }}
-        >
-          &#x26A1; Start agent draft &rarr;
-        </button>
-      )}
-      {isPending && !result && task.assignee === "user" && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button
-            onClick={() => onMarkDone(task.id)}
-            style={{
-              padding: "7px 16px",
-              border: `1px solid ${PRIMARY}`,
-              borderRadius: 8,
-              background: "transparent",
-              color: PRIMARY,
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
-              fontFamily: "'DM Sans', sans-serif",
-            }}
-          >
-            Mark done &rarr;
-          </button>
-        </div>
-      )}
-
-      {isPending && (task.assignee === "user" || task.assignee === "hybrid") && (
-        <TaskChat task={task} projectSummary={projectSummary} priorResults={priorResults} />
-      )}
-
-      {/* ─── Hybrid two-phase handoff ─── */}
-      {result && task.assignee === "hybrid" && (() => {
-        const agentSubs = task.subtasks?.filter((st) => st.assignee === "agent") || [];
-        const userSubs = task.subtasks?.filter((st) => st.assignee === "user") || [];
-        const agentDone = result.done;
-
-        return (
-          <div style={{ marginTop: 8 }}>
-            {/* Phase 1: Agent's work */}
-            <div style={{
-              padding: "8px 12px",
-              borderRadius: "8px 8px 0 0",
-              background: agentDone ? "#2DA44E0c" : `${PRIMARY}08`,
-              border: `1px solid ${agentDone ? "#2DA44E25" : `${PRIMARY}18`}`,
-              borderBottom: "none",
-              fontSize: 12,
-              fontWeight: 600,
-              color: agentDone ? "#2DA44E" : PRIMARY,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-            }}>
-              {agentDone ? "\u2713 Agent\u2019s work complete" : "\u26A1 Agent working..."}
-              {agentSubs.length > 0 && (
-                <span style={{ fontWeight: 400, color: TEXT_LIGHT }}>
-                  ({agentSubs.length} step{agentSubs.length !== 1 ? "s" : ""})
-                </span>
-              )}
-            </div>
-            <div style={{
-              border: `1px solid ${BORDER}`,
-              borderTop: "none",
-              borderRadius: "0 0 8px 8px",
-              marginBottom: 12,
-              overflow: "hidden",
-            }}>
-              <AgentPanel result={result} showApprove={false} />
-            </div>
-
-            {/* Phase 2: Your turn */}
-            {agentDone && (
-              <div>
-                <div style={{
-                  padding: "8px 12px",
-                  borderRadius: "8px 8px 0 0",
-                  background: "#C4841D0a",
-                  border: "1px solid #C4841D20",
-                  borderBottom: "none",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "#C4841D",
-                }}>
-                  Your turn — review and act
-                  {userSubs.length > 0 && (
-                    <span style={{ fontWeight: 400, color: TEXT_LIGHT, marginLeft: 6 }}>
-                      ({userSubs.length} step{userSubs.length !== 1 ? "s" : ""})
-                    </span>
-                  )}
-                </div>
-                <div style={{
-                  border: "1px solid #C4841D20",
-                  borderTop: "none",
-                  borderRadius: "0 0 8px 8px",
-                  padding: 14,
-                  background: SURFACE,
-                }}>
-                  {userSubs.length > 0 ? (
-                    <div style={{ marginBottom: 12 }}>
-                      {userSubs.map((st) => (
-                        <SubtaskItem
-                          key={st.id}
-                          st={st}
-                          done={doneSubtaskIds.has(st.id)}
-                          onToggle={onToggleSubtask}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: 13, color: "#787774", marginBottom: 12 }}>
-                      Review the agent&apos;s output above, then approve or regenerate.
-                    </div>
-                  )}
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      onClick={() => onMarkDone(task.id)}
-                      style={{
-                        padding: "8px 18px",
-                        border: "none",
-                        borderRadius: 8,
-                        background: "#C4841D",
-                        color: "#fff",
-                        fontSize: 13,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        fontFamily: "'DM Sans', sans-serif",
-                      }}
-                    >
-                      Approve &amp; continue &rarr;
-                    </button>
-                    <button
-                      onClick={() => onRunAgent(task, true)}
-                      style={{
-                        padding: "8px 14px",
-                        border: `1px solid ${BORDER}`,
-                        borderRadius: 8,
-                        background: "transparent",
-                        color: TEXT_LIGHT,
-                        fontSize: 13,
-                        cursor: "pointer",
-                        fontFamily: "'DM Sans', sans-serif",
-                      }}
-                    >
-                      Regenerate
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })()}
-      {result && task.assignee === "agent" && (
-        <AgentPanel result={result} />
-      )}
-    </div>
-  );
-}
-
-// ─── DagView ───
-
-function DagView({
-  nodes,
-  energyFilter,
-  assigneeFilter,
-  results,
-  onMarkDone,
-  onRunAgent,
-  projectSummary,
-  doneSubtaskIds,
-  onToggleSubtask,
-  allTasks,
-}: {
-  nodes: DagNode[];
-  energyFilter: Energy | "all";
-  assigneeFilter: Assignee | "all";
-  results: Record<string, AgentResult>;
-  onMarkDone: (id: string) => void;
-  onRunAgent: (task: Task, force?: boolean) => void;
-  projectSummary: string;
-  doneSubtaskIds: Set<string>;
-  onToggleSubtask: (id: string) => void;
-  allTasks: Task[];
-}) {
-  const [view, setView] = useState<"steps" | "graph">("steps");
-  const [completedExpanded, setCompletedExpanded] = useState(false);
-
-  // Build prior results from completed tasks
-  const buildPriorResults = (): PriorResult[] => {
-    return allTasks
-      .filter((t) => results[t.id]?.done)
-      .map((t) => ({
-        title: t.title,
-        assignee: t.assignee,
-        output: results[t.id]?.finalOutput || results[t.id]?.steps
-          ?.filter((s) => s.type === "output")
-          .map((s) => s.type === "output" ? s.content : "")
-          .join("\n") || "",
-      }));
-  };
-
-  const priorResults = buildPriorResults();
-
-  const matchesFilters = (t: Task) => {
-    if (energyFilter !== "all" && t.energy !== energyFilter) return false;
-    if (assigneeFilter !== "all" && t.assignee !== assigneeFilter) return false;
-    return true;
-  };
-
-  const filteredNodes = (energyFilter === "all" && assigneeFilter === "all")
-    ? nodes
-    : nodes
-        .map((n) => {
-          if (n.type === "task") return matchesFilters(n) ? n : null;
-          const filtered = n.children.filter(matchesFilters);
-          if (filtered.length === 0) return null;
-          return { ...n, children: filtered };
-        })
-        .filter(Boolean) as DagNode[];
-
-  return (
-    <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        <button
-          onClick={() => setView("steps")}
-          style={{
-            padding: "6px 14px",
-            borderRadius: 8,
-            border: "none",
-            background: view === "steps" ? PRIMARY : BORDER,
-            color: view === "steps" ? "#fff" : "#666",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "'DM Sans', sans-serif",
-          }}
-        >
-          &#x1F4CB; Steps
-        </button>
-        <button
-          onClick={() => setView("graph")}
-          style={{
-            padding: "6px 14px",
-            borderRadius: 8,
-            border: "none",
-            background: view === "graph" ? PRIMARY : BORDER,
-            color: view === "graph" ? "#fff" : "#666",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "'DM Sans', sans-serif",
-          }}
-        >
-          &#x1F500; Graph
-        </button>
-      </div>
-
-      {view === "steps" ? (() => {
-        const isNodeDone = (node: DagNode) =>
-          node.type === "task" ? node.status === "done" : node.children.every((c) => c.status === "done");
-        const activeNodes = filteredNodes.filter((n) => !isNodeDone(n));
-        const doneNodes = filteredNodes.filter((n) => isNodeDone(n));
-        // Count all done tasks (including children in parallel groups)
-        const doneTaskCount = doneNodes.reduce((acc, n) => acc + (n.type === "task" ? 1 : n.children.length), 0);
-
-        const renderNode = (node: DagNode) => {
-          if (node.type === "task") {
-            return (
-              <TaskCard
-                key={node.id}
-                task={node}
-                result={results[node.id]}
-                onMarkDone={onMarkDone}
-                onRunAgent={onRunAgent}
-                projectSummary={projectSummary}
-                doneSubtaskIds={doneSubtaskIds}
-                onToggleSubtask={onToggleSubtask}
-                priorResults={priorResults}
-                allTasksList={allTasks}
-              />
-            );
-          }
-          return (
-            <div key={node.id}>
-              <div
-                style={{
-                  textAlign: "center",
-                  color: TEXT_LIGHT,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  letterSpacing: 1,
-                  textTransform: "uppercase",
-                  margin: "8px 0",
-                }}
-              >
-                &mdash; Can do simultaneously &mdash;
-              </div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-                  gap: 12,
-                }}
-              >
-                {node.children.map((child) => (
-                  <TaskCard
-                    key={child.id}
-                    task={child}
-                    result={results[child.id]}
-                    onMarkDone={onMarkDone}
-                    onRunAgent={onRunAgent}
-                    projectSummary={projectSummary}
-                    doneSubtaskIds={doneSubtaskIds}
-                    onToggleSubtask={onToggleSubtask}
-                    priorResults={priorResults}
-                    allTasksList={allTasks}
-                  />
-                ))}
-              </div>
-            </div>
-          );
-        };
-
-        return (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {activeNodes.map(renderNode)}
-            {doneTaskCount > 0 && (
-              <>
-                <div
-                  onClick={() => setCompletedExpanded((v) => !v)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    cursor: "pointer",
-                    padding: "10px 0",
-                    userSelect: "none",
-                  }}
-                >
-                  <div style={{ flex: 1, height: 1, background: BORDER }} />
-                  <span style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: TEXT_LIGHT,
-                    textTransform: "uppercase",
-                    letterSpacing: 0.5,
-                    whiteSpace: "nowrap",
-                  }}>
-                    <span style={{
-                      fontSize: 10,
-                      transition: "transform 0.2s",
-                      transform: completedExpanded ? "rotate(0deg)" : "rotate(-90deg)",
-                      display: "inline-block",
-                    }}>
-                      {"\u25BC"}
-                    </span>
-                    <span style={{ color: "#2DA44E" }}>{"\u2713"}</span>
-                    Completed ({doneTaskCount})
-                  </span>
-                  <div style={{ flex: 1, height: 1, background: BORDER }} />
-                </div>
-                {completedExpanded && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {doneNodes.map(renderNode)}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        );
-      })() : (
-        <AsciiGraph nodes={filteredNodes} />
-      )}
-    </div>
-  );
-}
-
-function AsciiGraph({ nodes }: { nodes: DagNode[] }) {
-  const lines: string[] = [];
-  nodes.forEach((node, i) => {
-    const isLast = i === nodes.length - 1;
-    const prefix = isLast ? "\u2514\u2500" : "\u251C\u2500";
-    if (node.type === "task") {
-      const label = assigneeLabel(node.assignee);
-      const dot = energyDot(node.energy);
-      const status = node.status === "done" ? " \u2713" : node.status === "locked" ? " \uD83D\uDD12" : "";
-      lines.push(`${prefix} [${label}] ${node.title} ${dot}${status}`);
-    } else {
-      lines.push(`${prefix} \u2550\u2550 PARALLEL GROUP \u2550\u2550`);
-      node.children.forEach((child, j) => {
-        const cPrefix = j === node.children.length - 1 ? "   \u2514\u2500" : "   \u251C\u2500";
-        const label = assigneeLabel(child.assignee);
-        const dot = energyDot(child.energy);
-        const status = child.status === "done" ? " \u2713" : child.status === "locked" ? " \uD83D\uDD12" : "";
-        lines.push(`${cPrefix} [${label}] ${child.title} ${dot}${status}`);
-      });
-    }
-  });
-  return (
-    <pre
-      style={{
-        background: "#1C1C1E",
-        color: "#e0e0e0",
-        fontFamily: "'DM Mono', 'Fira Code', monospace",
-        fontSize: 13,
-        lineHeight: 1.8,
-        padding: 20,
-        borderRadius: 12,
-        overflow: "auto",
-      }}
-    >
-      {lines.join("\n")}
-    </pre>
-  );
-}
-
-function assigneeLabel(a: string) {
-  return a === "agent" ? "\u26A1 Agent" : a === "user" ? "\uD83D\uDC64 User" : "\uD83E\uDD1D Hybrid";
-}
-function energyDot(e: Energy) {
-  return e === "high" ? "\uD83D\uDD34" : e === "medium" ? "\uD83D\uDFE1" : "\uD83D\uDFE2";
-}
-
-// ─── Main Page ───
-
-type ClarifyQuestion = {
-  id: string;
-  question: string;
-  type: "yes_no" | "choice" | "short";
-  options?: string[];
-};
-
-type Step = "input" | "clarify" | "compiling" | "reveal";
+import { templates, type ProjectTemplate } from "@/lib/templates";
+import {
+  PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, ENERGY_COLORS,
+  type ExecutionMode, type Step, type ClarifyQuestion, type PriorResult,
+  type UserToolConfig, type UserTool, TOOL_CAPABILITIES,
+} from "@/lib/styles";
+import { Header } from "@/components/Header";
+import { ThinkingTerminal } from "@/components/ThinkingTerminal";
+import { TaskCard, CATEGORY_ICONS, inferCategory } from "@/components/TaskCard";
+import { DagView } from "@/components/DagView";
+import { WelcomeBack } from "@/components/WelcomeBack";
 
 export default function Home() {
   const { user, loading: authLoading, signInWithEmail, signUpWithEmail, signOut, configured: authConfigured } = useAuth();
-  const { savePlan, loadPlans, updateProgress } = usePlanStorage(user?.id);
+  const { savePlan, loadPlans, deletePlan } = usePlanStorage(user?.id);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [savedPlanId, setSavedPlanId] = useState<string | null>(null);
 
-  const [step, setStep] = useState<Step>("input");
+  const [step, setStep] = useState<Step>("dashboard");
+  const [savedPlans, setSavedPlans] = useState<{ id: string; brief: string; project_title: string; summary: string; nodes: DagNode[]; done_ids: string[]; done_subtask_ids: string[]; priority: ProjectPriority; created_at: string; updated_at: string }[]>([]);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
   const [brief, setBrief] = useState("");
   const voiceInput = useVoiceInput(useCallback((text: string) => {
     setBrief((prev) => prev + (prev ? " " : "") + text);
@@ -1422,6 +52,7 @@ export default function Home() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [clarifyLoading, setClarifyLoading] = useState(false);
   const [clarifyError, setClarifyError] = useState("");
+  const [compileError, setCompileError] = useState("");
   const [questionIndex, setQuestionIndex] = useState(0);
   const [revealMode, setRevealMode] = useState<"onething" | "project">("onething");
   const [thinkingText, setThinkingText] = useState("");
@@ -1433,8 +64,126 @@ export default function Home() {
   const [energyFilter, setEnergyFilter] = useState<Energy | "all">("all");
   const [assigneeFilter, setAssigneeFilter] = useState<Assignee | "all">("all");
   const [doneSubtaskIds, setDoneSubtaskIds] = useState<Set<string>>(new Set());
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("letsbegin-execution-mode");
+      if (saved === "api" || saved === "byo") return saved;
+    }
+    return "api";
+  });
+  const [userTools, setUserTools] = useState<UserToolConfig>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("letsbegin-user-tools");
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    return { available: [] };
+  });
+  const [justMeMode, setJustMeMode] = useState(false);
+  const [currentEnergy, setCurrentEnergy] = useState<Energy | null>(null);
+  const [streak, setStreak] = useState(0);
+  const [lastCompletedAt, setLastCompletedAt] = useState<number | null>(null);
+  const [showEncouragement, setShowEncouragement] = useState<string | null>(null);
+  const [showBreakReminder, setShowBreakReminder] = useState(false);
+  const [undoToast, setUndoToast] = useState<{ id: string; title: string } | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newTaskDesc, setNewTaskDesc] = useState("");
+  const [newTaskAssignee, setNewTaskAssignee] = useState<Assignee>("user");
+  const [newTaskEnergy, setNewTaskEnergy] = useState<Energy>("medium");
+  const [newTaskDeadline, setNewTaskDeadline] = useState("");
+  const [lastVisitAt, setLastVisitAt] = useState<number | null>(null);
+  const [showWelcomeBack, setShowWelcomeBack] = useState(false);
+  const [projectPriority, setProjectPriority] = useState<ProjectPriority>("medium");
+  const [focusCategory, setFocusCategory] = useState<TaskCategory | "all">("all");
+  const [detourDismissed, setDetourDismissed] = useState(false);
 
   const { execute, results, running, runningCount } = useAgentExecutor();
+
+  // Load saved plans for dashboard
+  useEffect(() => {
+    if (user && step === "dashboard") {
+      setDashboardLoading(true);
+      loadPlans().then((plans) => {
+        setSavedPlans(plans);
+        setDashboardLoading(false);
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, step]);
+
+  // Persist userTools to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("letsbegin-user-tools", JSON.stringify(userTools));
+    }
+  }, [userTools]);
+
+  // Persist executionMode to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("letsbegin-execution-mode", executionMode);
+    }
+  }, [executionMode]);
+
+  const loadSavedPlan = useCallback((saved: typeof savedPlans[0]) => {
+    setBrief(saved.brief);
+    setPlan({
+      project_title: saved.project_title,
+      summary: saved.summary,
+      nodes: saved.nodes,
+    });
+    setDoneIds(new Set(saved.done_ids));
+    setDoneSubtaskIds(new Set(saved.done_subtask_ids));
+    setSavedPlanId(saved.id);
+    setProjectPriority(saved.priority || "medium");
+    setFocusCategory("all");
+    setDetourDismissed(false);
+    // Read last visit timestamp for welcome-back recap
+    const visitKey = `letsbegin-last-visit-${saved.id}`;
+    const storedVisit = localStorage.getItem(visitKey);
+    if (storedVisit) {
+      const ts = parseInt(storedVisit, 10);
+      const minutesAway = (Date.now() - ts) / 60000;
+      setLastVisitAt(ts);
+      setShowWelcomeBack(minutesAway >= 30);
+    } else {
+      setLastVisitAt(null);
+      setShowWelcomeBack(false);
+    }
+    // Update last visit timestamp to now
+    localStorage.setItem(visitKey, String(Date.now()));
+    setStep("reveal");
+  }, []);
+
+  const startFromTemplate = useCallback((template: ProjectTemplate) => {
+    setBrief(template.brief);
+    if (template.justMeDefault) setJustMeMode(true);
+    setStep("input");
+  }, []);
+
+  const startNewProject = useCallback(() => {
+    if (plan && !confirm("Start a new project? Your current progress is saved.")) return;
+    setBrief("");
+    setPlan(null);
+    setDoneIds(new Set());
+    setDoneSubtaskIds(new Set());
+    setSavedPlanId(null);
+    setJustMeMode(false);
+    setCurrentEnergy(null);
+    setStreak(0);
+    setShowBreakReminder(false);
+    setFocusCategory("all");
+    setDetourDismissed(false);
+    setProjectPriority("medium");
+    setStep("input");
+  }, [plan]);
+
+  const goToDashboard = useCallback(() => {
+    setStep("dashboard");
+  }, []);
 
   // Elapsed timer for compiling phase
   useEffect(() => {
@@ -1451,16 +200,192 @@ export default function Home() {
 
   const currentNodes = plan ? computeUnlocked(plan.nodes, doneIds) : [];
 
+  // Welcome-back recap data
+  const welcomeBackData = useMemo(() => {
+    if (!showWelcomeBack || !lastVisitAt || !plan) return null;
+    const minutesAway = (Date.now() - lastVisitAt) / 60000;
+    if (minutesAway < 30) return null;
+    const tasks = getAllTasks(plan.nodes);
+    const completedTasks = tasks.filter((t) => doneIds.has(t.id)).length;
+    // Find tasks completed since last visit
+    const completedSinceVisit = tasks.filter(
+      (t) => t.completed_at && new Date(t.completed_at).getTime() > lastVisitAt
+    );
+    const lastCompleted = completedSinceVisit.sort(
+      (a, b) => new Date(b.completed_at!).getTime() - new Date(a.completed_at!).getTime()
+    )[0];
+    // Agent tasks that completed while away
+    const agentCompletedTitles = completedSinceVisit
+      .filter((t) => t.assignee === "agent")
+      .map((t) => t.title);
+    // Next task from scoring
+    const unlocked = computeUnlocked(plan.nodes, doneIds);
+    const pendingTasks = getAllTasks(unlocked).filter((t) => t.status === "pending");
+    const pendingHuman = pendingTasks.filter((t) => t.assignee === "user" || t.assignee === "hybrid");
+    const scored = scoreTasks(
+      pendingHuman.length > 0 ? pendingHuman : pendingTasks,
+      tasks,
+      currentEnergy,
+      projectPriority,
+    );
+    const topPriority = scored[0];
+    return {
+      minutesAway,
+      totalTasks: tasks.length,
+      completedTasks,
+      lastCompletedTitle: lastCompleted?.title,
+      nextTaskTitle: topPriority?.task.title,
+      nextTaskReason: topPriority?.reasons[0],
+      agentCompletedTitles,
+    };
+  }, [showWelcomeBack, lastVisitAt, plan, doneIds, currentEnergy, projectPriority]);
+
+  // Encouragement messages for completing tasks
+  const encouragements = [
+    "Nice work! One down.",
+    "You're making progress.",
+    "That's done. On to the next.",
+    "Steady progress. Keep going.",
+    "Another one handled.",
+    "You're on a roll.",
+    "Well done. Take a breath if you need.",
+    "That wasn't so bad, right?",
+    "Progress feels good.",
+    "One step closer.",
+  ];
+  const streakEncouragements = [
+    "", // 0
+    "", // 1
+    "Two in a row!", // 2
+    "Three tasks done. You're in the zone.", // 3
+    "Four! Seriously impressive focus.", // 4
+    "Five tasks straight. Consider a break soon.", // 5
+  ];
+
   const markDone = useCallback(
-    (id: string) => {
+    (id: string, notes?: string) => {
       setDoneIds((prev) => {
         const next = new Set(prev);
         next.add(id);
         return next;
       });
+      // Update plan with completion timestamp, notes, and activity
+      setPlan((prev) => {
+        if (!prev) return prev;
+        const now = new Date().toISOString();
+        const updateTask = (t: Task): Task => {
+          if (t.id !== id) return t;
+          const activity: ActivityEvent[] = [...(t.activity || []), { type: "completed", at: now }];
+          if (notes) activity.splice(activity.length - 1, 0, { type: "note", text: notes, at: now });
+          return { ...t, completed_at: now, notes: notes || t.notes, activity };
+        };
+        return {
+          ...prev,
+          nodes: prev.nodes.map((n): DagNode =>
+            n.type === "task" ? updateTask(n) : { ...n, children: n.children.map(updateTask) }
+          ),
+        };
+      });
+      // Streak and encouragement tracking
+      const now = Date.now();
+      setStreak((prev) => {
+        const newStreak = prev + 1;
+        // Show break reminder after 5+ tasks
+        if (newStreak >= 5) setShowBreakReminder(true);
+        return newStreak;
+      });
+      setLastCompletedAt(now);
+      // Pick an encouragement message
+      setShowEncouragement(encouragements[Math.floor(Math.random() * encouragements.length)]);
+      setTimeout(() => setShowEncouragement(null), 3000);
+      // Show undo toast
+      const task = allTasks.find((t) => t.id === id);
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      setUndoToast({ id, title: task?.title || id });
+      undoTimerRef.current = setTimeout(() => setUndoToast(null), 5000);
     },
-    []
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allTasks]
   );
+
+  const unmarkDone = useCallback((id: string) => {
+    setDoneIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const updateTask = (t: Task): Task => {
+        if (t.id !== id) return t;
+        return { ...t, completed_at: undefined };
+      };
+      return {
+        ...prev,
+        nodes: prev.nodes.map((n): DagNode =>
+          n.type === "task" ? updateTask(n) : { ...n, children: n.children.map(updateTask) }
+        ),
+      };
+    });
+    setUndoToast(null);
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+  }, []);
+
+  const addNewTask = useCallback((title: string, description: string, assignee: Assignee, energy: Energy, deadline?: string) => {
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const newTask: Task = {
+        id: `custom-${Date.now()}`,
+        type: "task",
+        title,
+        description,
+        assignee,
+        energy,
+        status: "pending",
+        depends_on: [],
+        agent_type: assignee === "agent" ? "builtin" : undefined,
+        deadline: deadline || undefined,
+      };
+      return { ...prev, nodes: [...prev.nodes, newTask] };
+    });
+  }, []);
+
+  const editTask = useCallback((taskId: string, updates: { title?: string; description?: string; assignee?: Assignee; agent_type?: AgentType; deadline?: string }) => {
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const updateTask = (t: Task): Task => {
+        if (t.id !== taskId) return t;
+        return { ...t, ...updates };
+      };
+      return {
+        ...prev,
+        nodes: prev.nodes.map((n): DagNode =>
+          n.type === "task" ? updateTask(n) : { ...n, children: n.children.map(updateTask) }
+        ),
+      };
+    });
+  }, []);
+
+  const addNote = useCallback((taskId: string, note: string) => {
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const now = new Date().toISOString();
+      const updateTask = (t: Task): Task => {
+        if (t.id !== taskId) return t;
+        return {
+          ...t,
+          notes: note,
+          activity: [...(t.activity || []), { type: "note" as const, text: note, at: now }],
+        };
+      };
+      return {
+        ...prev,
+        nodes: prev.nodes.map((n): DagNode =>
+          n.type === "task" ? updateTask(n) : { ...n, children: n.children.map(updateTask) }
+        ),
+      };
+    });
+  }, []);
 
   const toggleSubtask = useCallback((subtaskId: string) => {
     setDoneSubtaskIds((prev) => {
@@ -1502,17 +427,26 @@ export default function Home() {
   useEffect(() => {
     if (!plan || !user) return;
     const timeout = setTimeout(() => {
-      savePlan(brief, plan, doneIds, doneSubtaskIds).then((result) => {
+      savePlan(brief, plan, doneIds, doneSubtaskIds, projectPriority).then((result) => {
         if (result?.id && !savedPlanId) setSavedPlanId(result.id);
       });
     }, 1000); // Debounce 1s
     return () => clearTimeout(timeout);
-  }, [plan, doneIds, doneSubtaskIds, user, brief, savePlan, savedPlanId]);
+  }, [plan, doneIds, doneSubtaskIds, user, brief, savePlan, savedPlanId, projectPriority]);
 
-  // Auto-run agent tasks when they become unblocked
+  // Save last visit timestamp for new plans once savedPlanId is assigned
+  useEffect(() => {
+    if (!savedPlanId || step !== "reveal") return;
+    const visitKey = `letsbegin-last-visit-${savedPlanId}`;
+    if (!localStorage.getItem(visitKey)) {
+      localStorage.setItem(visitKey, String(Date.now()));
+    }
+  }, [savedPlanId, step]);
+
+  // Auto-run agent tasks when they become unblocked (API mode only)
   const currentTasksForAutoRun = getAllTasks(currentNodes);
   useEffect(() => {
-    if (step !== "reveal" || !plan) return;
+    if (step !== "reveal" || !plan || executionMode === "byo") return;
 
     for (const task of currentTasksForAutoRun) {
       if (
@@ -1523,17 +457,78 @@ export default function Home() {
       ) {
         launchedAgentTasks.current.add(task.id);
         // Stagger launches slightly to avoid hammering the API
+        const agentType = task.agent_type;
         setTimeout(() => {
-          execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee);
+          execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee, false, agentType);
         }, launchedAgentTasks.current.size * 500);
       }
     }
-  }, [currentTasksForAutoRun, step, plan, results, execute, brief]);
+  }, [currentTasksForAutoRun, step, plan, results, execute, brief, executionMode]);
 
   const handleRunAgent = (task: Task, force?: boolean) => {
     launchedAgentTasks.current.add(task.id);
-    execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee, force);
+    // Track activity
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const now = new Date().toISOString();
+      const updateTask = (t: Task): Task => {
+        if (t.id !== task.id) return t;
+        const event: ActivityEvent = { type: "agent_started", agent: t.agent_type || "builtin", model: "", at: now };
+        return { ...t, started_at: t.started_at || now, activity: [...(t.activity || []), event] };
+      };
+      return {
+        ...prev,
+        nodes: prev.nodes.map((n): DagNode =>
+          n.type === "task" ? updateTask(n) : { ...n, children: n.children.map(updateTask) }
+        ),
+      };
+    });
+    execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee, force, task.agent_type);
   };
+
+  const handleDecompose = useCallback(async (taskId: string, granularity: "normal" | "detailed" | "tiny") => {
+    const task = allTasks.find((t) => t.id === taskId);
+    if (!task || !plan) return;
+
+    const res = await fetch("/api/decompose", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        taskTitle: task.title,
+        taskDescription: task.description,
+        projectContext: plan.summary || brief,
+        currentSubtasks: task.subtasks,
+        granularity,
+      }),
+    });
+
+    if (!res.ok) return;
+
+    const data = await res.json();
+    if (!data.subtasks) return;
+
+    // Convert API response subtasks to the Subtask format used in the plan
+    const newSubtasks = data.subtasks.map((st: { id: string; title: string; assignee: "user" | "agent"; description?: string }) => ({
+      id: st.id,
+      title: st.description ? `${st.title} — ${st.description}` : st.title,
+      assignee: st.assignee,
+      depends_on: [] as string[],
+    }));
+
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const updateTask = (t: Task): Task => {
+        if (t.id !== taskId) return t;
+        return { ...t, subtasks: newSubtasks };
+      };
+      return {
+        ...prev,
+        nodes: prev.nodes.map((n): DagNode =>
+          n.type === "task" ? updateTask(n) : { ...n, children: n.children.map(updateTask) }
+        ),
+      };
+    });
+  }, [allTasks, plan, brief]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1603,7 +598,25 @@ export default function Home() {
         if (q) enriched += `\n- ${q.question} → ${answer}`;
       }
     }
+    if (justMeMode) {
+      enriched += "\n\nIMPORTANT: The user wants to do EVERYTHING themselves — no AI agents. Make ALL tasks assignee 'user'. Break tasks into very concrete, small steps. This person may have executive function challenges, so: be specific, be encouraging, and make each step feel achievable.";
+    }
     return enriched;
+  };
+
+  // Convert a plan to all-user tasks when in "just me" mode
+  const convertToJustMe = (p: Plan): Plan => {
+    const convertTask = (t: Task): Task => ({
+      ...t,
+      assignee: "user",
+      agent_type: undefined,
+    });
+    return {
+      ...p,
+      nodes: p.nodes.map((n): DagNode =>
+        n.type === "task" ? convertTask(n) : { ...n, children: n.children.map(convertTask) }
+      ),
+    };
   };
 
   const handleCompile = async () => {
@@ -1611,6 +624,7 @@ export default function Home() {
     setThinkingText("");
     setCompileStatus("Thinking through your brief...");
     setCompileStartTime(Date.now());
+    setCompileError("");
     setElapsed(0);
 
     const enrichedBrief = buildEnrichedBrief();
@@ -1623,165 +637,483 @@ export default function Home() {
       });
 
       const reader = res.body?.getReader();
-      if (!reader) return;
+      if (!reader) {
+        setCompileError("Failed to connect to the server. Please try again.");
+        setCompileStartTime(null);
+        setStep("input");
+        return;
+      }
 
       const decoder = new TextDecoder();
       let buffer = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const event = JSON.parse(line);
-            if (event.type === "thought") {
-              setThinkingText((prev) => prev + event.text);
-            } else if (event.type === "status") {
-              setCompileStatus(event.text);
-            } else if (event.type === "plan") {
-              setCompileStartTime(null);
-              setPlan(event.plan);
-              setStep("reveal");
-            } else if (event.type === "subtasks") {
-              // Merge subtasks into the existing plan
-              setPlan((prev) => {
-                if (!prev) return prev;
-                const subtaskMap = new Map<string, string[]>();
-                for (const t of event.tasks) {
-                  subtaskMap.set(t.id, t.subtasks);
-                }
-                const updatedNodes = prev.nodes.map((node: DagNode) => {
-                  if (node.type === "task" && subtaskMap.has(node.id)) {
-                    return { ...node, subtasks: subtaskMap.get(node.id) };
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line);
+              if (event.type === "thought") {
+                setThinkingText((prev) => prev + event.text);
+              } else if (event.type === "status") {
+                setCompileStatus(event.text);
+              } else if (event.type === "plan") {
+                setCompileStartTime(null);
+                const receivedPlan = justMeMode ? convertToJustMe(event.plan) : event.plan;
+                setPlan(receivedPlan);
+                setStep("reveal");
+              } else if (event.type === "subtasks") {
+                // Merge subtasks into the existing plan
+                setPlan((prev) => {
+                  if (!prev) return prev;
+                  const subtaskMap = new Map<string, string[]>();
+                  for (const t of event.tasks) {
+                    subtaskMap.set(t.id, t.subtasks);
                   }
-                  if (node.type === "parallel_group") {
-                    return {
-                      ...node,
-                      children: node.children.map((child: Task) =>
-                        subtaskMap.has(child.id)
-                          ? { ...child, subtasks: subtaskMap.get(child.id) }
-                          : child
-                      ),
-                    };
-                  }
-                  return node;
+                  const updatedNodes = prev.nodes.map((node: DagNode) => {
+                    if (node.type === "task" && subtaskMap.has(node.id)) {
+                      return { ...node, subtasks: subtaskMap.get(node.id) };
+                    }
+                    if (node.type === "parallel_group") {
+                      return {
+                        ...node,
+                        children: node.children.map((child: Task) =>
+                          subtaskMap.has(child.id)
+                            ? { ...child, subtasks: subtaskMap.get(child.id) }
+                            : child
+                        ),
+                      };
+                    }
+                    return node;
+                  });
+                  return { ...prev, nodes: updatedNodes as DagNode[] };
                 });
-                return { ...prev, nodes: updatedNodes as DagNode[] };
-              });
-            } else if (event.type === "error") {
-              console.error("Compile error:", event.text);
-              setCompileStatus("error:" + (event.text || "Unknown error"));
-              setCompileStartTime(null);
+              } else if (event.type === "error") {
+                console.error("Compile error:", event.text);
+                setCompileStatus("error:" + (event.text || "Unknown error"));
+                setCompileStartTime(null);
+              }
+            } catch {
+              // skip malformed lines
             }
-          } catch {
-            // skip malformed lines
           }
         }
+      } catch (streamErr) {
+        console.error("Stream reading failed:", streamErr);
+        setCompileError("Connection lost while building your plan. Please try again.");
+        setCompileStartTime(null);
+        setStep("input");
       }
     } catch (err) {
       console.error("Compile failed:", err);
+      setCompileError("Failed to build plan: " + String(err));
       setCompileStartTime(null);
       setStep("input");
     }
   };
 
-  const agentCount = allTasks.filter((t) => t.assignee === "agent").length;
+  const claudeCodeCount = allTasks.filter((t) => t.agent_type === "claude-code").length;
+  const builtinAgentCount = allTasks.filter((t) => t.assignee === "agent" && t.agent_type !== "claude-code").length;
   const hybridCount = allTasks.filter((t) => t.assignee === "hybrid").length;
   const userCount = allTasks.filter((t) => t.assignee === "user").length;
 
   return (
     <div style={{ minHeight: "100vh" }}>
-      <Header plan={plan} doneCount={doneCount} total={total} running={running} runningCount={runningCount} userEmail={user?.email} onSignOut={signOut} />
+      <Header plan={plan} doneCount={doneCount} total={total} running={running} runningCount={runningCount} userEmail={user?.email} onSignOut={signOut} onDashboard={step !== "dashboard" ? goToDashboard : undefined} />
 
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "40px 20px" }}>
-        {/* ─── AUTH ─── */}
-        {authConfigured && !authLoading && !user && (
-          <div style={{ maxWidth: 380, margin: "60px auto", textAlign: "center" }}>
-            <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Welcome to LetsBegin</h2>
-            <p style={{ color: "#787774", fontSize: 14, marginBottom: 24 }}>Sign in to save your plans and progress.</p>
+        {/* ─── DASHBOARD ─── */}
+        {(user || !authConfigured) && step === "dashboard" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+              <h1 style={{ fontSize: 28, fontWeight: 700, color: TEXT, margin: 0 }}>
+                Your projects
+              </h1>
+              <button
+                onClick={startNewProject}
+                style={{
+                  padding: "10px 20px",
+                  border: "none",
+                  borderRadius: 10,
+                  background: PRIMARY,
+                  color: "#fff",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                + New project
+              </button>
+            </div>
 
-            <input
-              type="email"
-              placeholder="Email"
-              value={authEmail}
-              onChange={(e) => setAuthEmail(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                fontSize: 14,
-                fontFamily: "'DM Sans', sans-serif",
-                borderRadius: 8,
-                border: `1px solid ${BORDER}`,
-                outline: "none",
-                boxSizing: "border-box",
-                marginBottom: 8,
-              }}
-            />
-            <input
-              type="password"
-              placeholder="Password"
-              value={authPassword}
-              onChange={(e) => setAuthPassword(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                fontSize: 14,
-                fontFamily: "'DM Sans', sans-serif",
-                borderRadius: 8,
-                border: `1px solid ${BORDER}`,
-                outline: "none",
-                boxSizing: "border-box",
-                marginBottom: 12,
-              }}
-            />
+            {/* Active projects */}
+            {dashboardLoading ? (
+              <div style={{ padding: 40, textAlign: "center", color: TEXT_LIGHT }}>Loading projects...</div>
+            ) : savedPlans.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 32 }}>
+                {savedPlans.map((saved) => {
+                  const tasks = getAllTasks(saved.nodes);
+                  const done = saved.done_ids?.length || 0;
+                  const totalTasks = tasks.length;
+                  const pct = totalTasks > 0 ? Math.round((done / totalTasks) * 100) : 0;
+                  const isComplete = done === totalTasks && totalTasks > 0;
 
-            {authError && (
-              <div style={{ fontSize: 12, color: "#CF522E", marginBottom: 12 }}>{authError}</div>
+                  return (
+                    <div
+                      key={saved.id}
+                      onClick={() => loadSavedPlan(saved)}
+                      style={{
+                        background: SURFACE,
+                        borderRadius: 12,
+                        padding: "16px 20px",
+                        border: `1px solid ${BORDER}`,
+                        cursor: "pointer",
+                        transition: "border-color 0.15s",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 16,
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.borderColor = PRIMARY)}
+                      onMouseLeave={(e) => (e.currentTarget.style.borderColor = BORDER)}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, color: isComplete ? "#2DA44E" : TEXT, display: "flex", alignItems: "center", gap: 6 }}>
+                          {isComplete && "\u2713 "}{saved.project_title || "Untitled project"}
+                          {saved.priority && saved.priority !== "medium" && (
+                            <span style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              padding: "1px 5px",
+                              borderRadius: 4,
+                              background: saved.priority === "high" ? "#CF522E18" : "#2DA44E18",
+                              color: saved.priority === "high" ? "#CF522E" : "#2DA44E",
+                            }}>
+                              {saved.priority === "high" ? "HIGH" : "LOW"}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
+                          {saved.summary?.slice(0, 100) || saved.brief?.slice(0, 100)}
+                          {(saved.summary?.length || saved.brief?.length || 0) > 100 ? "..." : ""}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#B0AFA8", marginTop: 4 }}>
+                          Updated {new Date(saved.updated_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0, display: "flex", alignItems: "center", gap: 12 }}>
+                        <div>
+                          <div style={{ fontSize: 20, fontWeight: 700, color: isComplete ? "#2DA44E" : PRIMARY }}>
+                            {pct}%
+                          </div>
+                          <div style={{ fontSize: 11, color: TEXT_LIGHT }}>
+                            {done}/{totalTasks} tasks
+                          </div>
+                          {/* Mini progress bar */}
+                          <div style={{ width: 60, height: 4, background: BORDER, borderRadius: 2, marginTop: 4, overflow: "hidden" }}>
+                            <div style={{ width: `${pct}%`, height: "100%", background: isComplete ? "#2DA44E" : PRIMARY, borderRadius: 2 }} />
+                          </div>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm("Delete this project?")) {
+                              deletePlan(saved.id).then(() => {
+                                setSavedPlans((prev) => prev.filter((p) => p.id !== saved.id));
+                              });
+                            }
+                          }}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: TEXT_LIGHT,
+                            fontSize: 16,
+                            cursor: "pointer",
+                            padding: "4px 6px",
+                            borderRadius: 4,
+                            opacity: 0.5,
+                            transition: "opacity 0.15s",
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                          onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.5")}
+                          title="Delete project"
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ marginBottom: 32 }}>
+                {/* Hero section for first-time visitors */}
+                <div style={{
+                  padding: "28px 24px",
+                  borderRadius: 14,
+                  background: `linear-gradient(135deg, ${PRIMARY}08, ${PRIMARY}03)`,
+                  border: `1px solid ${PRIMARY}18`,
+                  marginBottom: 24,
+                }}>
+                  <h2 style={{ fontSize: 22, fontWeight: 700, color: TEXT, margin: "0 0 8px 0" }}>
+                    Describe anything. Get a smart plan.
+                  </h2>
+                  <p style={{ fontSize: 14, color: TEXT_LIGHT, lineHeight: 1.6, margin: "0 0 16px 0" }}>
+                    Tell us what you want to accomplish in plain language. We&apos;ll break it into a dependency graph of tasks,
+                    figure out what to do first, and route work to the right tools.
+                  </p>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
+                    {[
+                      { icon: "\uD83E\uDDE0", title: "Bring your own AI", desc: "Use Claude Code, ChatGPT, Gemini \u2014 tools you already pay for" },
+                      { icon: "\uD83C\uDFAF", title: "One thing at a time", desc: "Smart scheduling picks your best next task based on energy & deadlines" },
+                      { icon: "\u26A1", title: "Agents do the rest", desc: "AI handles coding, writing, research \u2014 you handle the human parts" },
+                      { icon: "\uD83D\uDDA4", title: "ADHD-friendly", desc: "Break tasks down further, focus mode, welcome-back recaps" },
+                    ].map((f) => (
+                      <div key={f.title} style={{
+                        padding: "12px 14px",
+                        borderRadius: 10,
+                        background: SURFACE,
+                        border: `1px solid ${BORDER}`,
+                      }}>
+                        <div style={{ fontSize: 18, marginBottom: 4 }}>{f.icon}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 2 }}>{f.title}</div>
+                        <div style={{ fontSize: 11, color: TEXT_LIGHT, lineHeight: 1.4 }}>{f.desc}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    onClick={startNewProject}
+                    style={{
+                      padding: "10px 24px",
+                      border: "none",
+                      borderRadius: 10,
+                      background: PRIMARY,
+                      color: "#fff",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    Start your first project &rarr;
+                  </button>
+                </div>
+              </div>
             )}
 
-            <button
-              onClick={async () => {
-                setAuthError("");
-                const fn = authMode === "signin" ? signInWithEmail : signUpWithEmail;
-                const { error } = await fn(authEmail, authPassword);
-                if (error) setAuthError(error.message);
-              }}
-              style={{
-                width: "100%",
-                padding: "10px 16px",
-                borderRadius: 10,
-                border: "none",
-                background: PRIMARY,
-                color: "#fff",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "'DM Sans', sans-serif",
-                marginBottom: 12,
-              }}
-            >
-              {authMode === "signin" ? "Sign in" : "Create account"}
-            </button>
+            {/* Templates */}
+            <div style={{ marginBottom: 16 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 700, color: TEXT, marginBottom: 4 }}>
+                Quick start
+              </h2>
+              <p style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 16 }}>
+                Pick a template to get going fast. You can customize the brief before building.
+              </p>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                gap: 10,
+              }}>
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => startFromTemplate(t)}
+                    style={{
+                      background: SURFACE,
+                      borderRadius: 10,
+                      padding: "14px 14px",
+                      border: `1px solid ${BORDER}`,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontFamily: "'DM Sans', sans-serif",
+                      transition: "border-color 0.15s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = PRIMARY)}
+                    onMouseLeave={(e) => (e.currentTarget.style.borderColor = BORDER)}
+                  >
+                    <div style={{ fontSize: 20, marginBottom: 6 }}>{t.icon}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: TEXT }}>{t.title}</div>
+                    <div style={{ fontSize: 11, color: TEXT_LIGHT, marginTop: 2, textTransform: "capitalize" }}>
+                      {t.category}{t.justMeDefault ? " \u00B7 just you" : ""}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
-            <button
-              onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
-              style={{
-                background: "none",
-                border: "none",
-                color: PRIMARY,
-                fontSize: 13,
-                cursor: "pointer",
-                fontFamily: "'DM Sans', sans-serif",
-              }}
-            >
-              {authMode === "signin" ? "Need an account? Sign up" : "Already have an account? Sign in"}
-            </button>
+        {/* ─── LANDING + AUTH ─── */}
+        {authConfigured && !authLoading && !user && (
+          <div>
+            {/* Hero */}
+            <div style={{ textAlign: "center", marginBottom: 40, paddingTop: 20 }}>
+              <h1 style={{ fontSize: 40, fontWeight: 800, color: TEXT, margin: "0 0 12px 0", lineHeight: 1.15 }}>
+                Describe it. Plan it.<br />Get it done.
+              </h1>
+              <p style={{ fontSize: 17, color: TEXT_LIGHT, lineHeight: 1.6, maxWidth: 520, margin: "0 auto 24px" }}>
+                LetsBegin turns any goal into a smart project plan. AI handles what it can.
+                You handle what matters. Bring your own tools &mdash; no extra API costs.
+              </p>
+            </div>
+
+            {/* Feature grid */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: 14,
+              marginBottom: 40,
+            }}>
+              {[
+                { icon: "\uD83D\uDCAC", title: "Plain language in", desc: "Describe what you want to accomplish. We\u2019ll ask smart follow-up questions, then build a dependency graph of tasks." },
+                { icon: "\uD83E\uDDE0", title: "Bring your own AI", desc: "Have Claude Code, ChatGPT, or Gemini? Use them. We route each task to the best tool you already pay for." },
+                { icon: "\uD83C\uDFAF", title: "One thing at a time", desc: "Smart scheduling picks your next task based on deadlines, wait times, what it unblocks, and your energy level." },
+                { icon: "\u26A1", title: "Agents work for you", desc: "Coding, research, drafting \u2014 AI agents handle their tasks automatically or give you a ready-to-paste prompt." },
+                { icon: "\uD83D\uDCC5", title: "Deadline-aware", desc: "Set deadlines and the scheduler adjusts \u2014 factoring in wait times so you start things early enough." },
+                { icon: "\uD83D\uDDA4", title: "ADHD-friendly", desc: "Break any task into tiny steps, focus on one thing, get welcome-back recaps, and track streaks." },
+              ].map((f) => (
+                <div key={f.title} style={{
+                  padding: "16px",
+                  borderRadius: 12,
+                  background: SURFACE,
+                  border: `1px solid ${BORDER}`,
+                }}>
+                  <div style={{ fontSize: 22, marginBottom: 6 }}>{f.icon}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: TEXT, marginBottom: 4 }}>{f.title}</div>
+                  <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.5 }}>{f.desc}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* How it works */}
+            <div style={{ textAlign: "center", marginBottom: 40 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: TEXT, marginBottom: 16 }}>How it works</h2>
+              <div style={{ display: "flex", justifyContent: "center", gap: 32, flexWrap: "wrap" }}>
+                {[
+                  { step: "1", label: "Describe your project" },
+                  { step: "2", label: "Answer a few questions" },
+                  { step: "3", label: "Get your smart plan" },
+                  { step: "4", label: "Do one thing at a time" },
+                ].map((s) => (
+                  <div key={s.step} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{
+                      width: 28, height: 28, borderRadius: "50%",
+                      background: PRIMARY, color: "#fff",
+                      fontSize: 13, fontWeight: 700,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      flexShrink: 0,
+                    }}>{s.step}</span>
+                    <span style={{ fontSize: 13, color: TEXT, fontWeight: 500 }}>{s.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Auth form */}
+            <div style={{
+              maxWidth: 380,
+              margin: "0 auto",
+              padding: "28px 24px",
+              borderRadius: 14,
+              background: SURFACE,
+              border: `1px solid ${BORDER}`,
+              textAlign: "center",
+            }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: TEXT }}>
+                {authMode === "signin" ? "Welcome back" : "Get started free"}
+              </h3>
+              <p style={{ color: TEXT_LIGHT, fontSize: 13, marginBottom: 16 }}>
+                {authMode === "signin" ? "Sign in to continue your projects." : "Create an account to save your plans and progress."}
+              </p>
+
+              <input
+                type="email"
+                placeholder="Email"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  fontSize: 14,
+                  fontFamily: "'DM Sans', sans-serif",
+                  borderRadius: 8,
+                  border: `1px solid ${BORDER}`,
+                  outline: "none",
+                  boxSizing: "border-box",
+                  marginBottom: 8,
+                }}
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  fontSize: 14,
+                  fontFamily: "'DM Sans', sans-serif",
+                  borderRadius: 8,
+                  border: `1px solid ${BORDER}`,
+                  outline: "none",
+                  boxSizing: "border-box",
+                  marginBottom: 12,
+                }}
+              />
+
+              {authError && (
+                <div style={{ fontSize: 12, color: "#CF522E", marginBottom: 12 }}>{authError}</div>
+              )}
+
+              <button
+                onClick={async () => {
+                  setAuthError("");
+                  const fn = authMode === "signin" ? signInWithEmail : signUpWithEmail;
+                  const { error } = await fn(authEmail, authPassword);
+                  if (error) setAuthError(error.message);
+                }}
+                style={{
+                  width: "100%",
+                  padding: "10px 16px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: PRIMARY,
+                  color: "#fff",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                  marginBottom: 12,
+                }}
+              >
+                {authMode === "signin" ? "Sign in" : "Create account"}
+              </button>
+
+              <button
+                onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: PRIMARY,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                {authMode === "signin" ? "Need an account? Sign up" : "Already have an account? Sign in"}
+              </button>
+            </div>
+
+            <p style={{ textAlign: "center", fontSize: 11, color: "#B0AFA8", marginTop: 24 }}>
+              Free to use. Bring your own AI tools to save on API costs.
+            </p>
           </div>
         )}
 
@@ -1793,15 +1125,15 @@ export default function Home() {
             </h1>
             <p style={{ color: "#787774", fontSize: 16, marginBottom: 28, lineHeight: 1.6 }}>
               AI tools either do everything for you or leave you in a chat guessing
-              what to do next. LetsBegin coordinates — it builds a plan where agents
-              work in the background while you get guided through your part, one
-              thing at a time.
+              what to do next. LetsBegin coordinates — Claude plans, agents like
+              Claude Code handle the technical work, and you get guided through your
+              part with every step visible and traceable.
             </p>
 
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
+                gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
                 gap: 14,
                 marginBottom: 32,
               }}
@@ -1815,12 +1147,12 @@ export default function Home() {
                 {
                   num: "2",
                   title: "Get a dependency graph",
-                  desc: "AI compiles a real plan — not a to-do list. Tasks that can run in parallel do, and nothing blocks unnecessarily.",
+                  desc: "Claude builds a real plan — not a to-do list. It picks the right agent for each task and lets everything run in parallel.",
                 },
                 {
                   num: "3",
-                  title: "You and AI, in parallel",
-                  desc: "Agents auto-run their tasks while you focus on yours. One thing at a time, never overwhelmed.",
+                  title: "Visible, traceable work",
+                  desc: "Agents run in the background. Your tasks have notes, timestamps, and a full activity log — nothing gets lost.",
                 },
               ].map((s) => (
                 <div
@@ -1883,8 +1215,8 @@ export default function Home() {
                 </p>
                 <p style={{ margin: "0 0 10px" }}>
                   <strong>Unlike coding agents:</strong> LetsBegin handles the whole project — not
-                  just the code parts. It knows when a human needs to sign up for an account,
-                  make a decision, or review a draft.
+                  just the code parts. Claude Code handles the technical tasks. You handle what
+                  only you can do. Everything is visible and traceable.
                 </p>
                 <p style={{ margin: "0 0 10px" }}>
                   <strong>Unlike task managers:</strong> Tasks actually get done. Agents auto-execute
@@ -1892,11 +1224,26 @@ export default function Home() {
                 </p>
                 <p style={{ margin: 0 }}>
                   <strong>Designed for real humans:</strong> One task at a time. Step-by-step
-                  guidance when you need it. Big tasks broken into small, concrete actions. Built
-                  for people who find it hard to start, not just people who want to go faster.
+                  guidance when you need it. Energy-aware task ordering. Built for people
+                  with executive function challenges, not just productivity hackers. You can
+                  even turn off all agents and use it as a pure human planning tool.
                 </p>
               </div>
             </details>
+
+            {compileError && (
+              <div style={{
+                padding: "12px 16px",
+                borderRadius: 10,
+                background: "#CF522E0c",
+                border: "1px solid #CF522E30",
+                color: "#CF522E",
+                fontSize: 13,
+                marginBottom: 16,
+              }}>
+                {compileError}
+              </div>
+            )}
 
             <div style={{ position: "relative" }}>
               <textarea
@@ -2011,27 +1358,143 @@ export default function Home() {
             </div>
             {attachments.length > 0 && (
               <div style={{ marginTop: 6, fontSize: 11, color: TEXT_LIGHT }}>
-                Images will be analyzed by Gemini to understand your project context.
+                Images will be analyzed to understand your project context.
+              </div>
+            )}
+
+            {/* Just me mode toggle */}
+            <div
+              style={{
+                marginTop: 20,
+                padding: "14px 16px",
+                borderRadius: 10,
+                background: justMeMode ? `${PRIMARY}08` : SURFACE,
+                border: `1px solid ${justMeMode ? PRIMARY + "30" : BORDER}`,
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                cursor: "pointer",
+                transition: "all 0.2s",
+              }}
+              onClick={() => setJustMeMode(!justMeMode)}
+            >
+              <div
+                style={{
+                  width: 40,
+                  height: 22,
+                  borderRadius: 11,
+                  background: justMeMode ? PRIMARY : BORDER,
+                  position: "relative",
+                  transition: "background 0.2s",
+                  flexShrink: 0,
+                }}
+              >
+                <div
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    background: "#fff",
+                    position: "absolute",
+                    top: 2,
+                    left: justMeMode ? 20 : 2,
+                    transition: "left 0.2s",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.15)",
+                  }}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: justMeMode ? PRIMARY : TEXT }}>
+                  Just me, no agents
+                </div>
+                <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
+                  All tasks stay yours. Great for personal projects, executive function support, or when you just want a good plan to follow.
+                </div>
+              </div>
+            </div>
+
+            {/* AI Tools selector — what tools does the user have? */}
+            {!justMeMode && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: "14px 16px",
+                  borderRadius: 10,
+                  background: userTools.available.length > 0 ? "#E8F0FE08" : SURFACE,
+                  border: `1px solid ${userTools.available.length > 0 ? "#1967D230" : BORDER}`,
+                  transition: "all 0.2s",
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 600, color: userTools.available.length > 0 ? "#1967D2" : TEXT, marginBottom: 4 }}>
+                  What AI tools do you have?
+                </div>
+                <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4, marginBottom: 10 }}>
+                  Select the tools you already pay for. We&apos;ll route tasks to your tools to save API costs. Leave empty to use our API for everything.
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {(Object.keys(TOOL_CAPABILITIES) as UserTool[]).map((tool) => {
+                    const cap = TOOL_CAPABILITIES[tool];
+                    const isSelected = userTools.available.includes(tool);
+                    return (
+                      <button
+                        key={tool}
+                        onClick={() => {
+                          setUserTools((prev) => {
+                            const next = isSelected
+                              ? prev.available.filter((t) => t !== tool)
+                              : [...prev.available, tool];
+                            const newMode = next.length > 0 ? "byo" : "api";
+                            setExecutionMode(newMode);
+                            return { ...prev, available: next as UserTool[] };
+                          });
+                        }}
+                        style={{
+                          padding: "5px 10px",
+                          borderRadius: 7,
+                          border: `1.5px solid ${isSelected ? "#1967D2" : BORDER}`,
+                          background: isSelected ? "#E8F0FE" : "transparent",
+                          color: isSelected ? "#1967D2" : TEXT_LIGHT,
+                          fontSize: 12,
+                          fontWeight: isSelected ? 600 : 400,
+                          cursor: "pointer",
+                          fontFamily: "'DM Sans', sans-serif",
+                          transition: "all 0.15s",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        {cap.icon} {cap.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {userTools.available.length > 0 && (
+                  <div style={{ marginTop: 8, fontSize: 11, color: "#1967D2", fontWeight: 500 }}>
+                    {userTools.available.length} tool{userTools.available.length !== 1 ? "s" : ""} selected — agent tasks will use your tools instead of our API
+                  </div>
+                )}
               </div>
             )}
 
             <button
               onClick={handleClarify}
-              disabled={brief.trim().length < 10}
+              disabled={brief.trim().length < 10 || clarifyLoading}
               style={{
                 marginTop: 16,
                 padding: "12px 32px",
                 border: "none",
                 borderRadius: 10,
-                background: brief.trim().length < 10 ? "#ccc" : PRIMARY,
+                background: (brief.trim().length < 10 || clarifyLoading) ? "#ccc" : PRIMARY,
                 color: "#fff",
                 fontSize: 15,
                 fontWeight: 600,
-                cursor: brief.trim().length < 10 ? "not-allowed" : "pointer",
+                cursor: (brief.trim().length < 10 || clarifyLoading) ? "not-allowed" : "pointer",
+                opacity: clarifyLoading ? 0.6 : 1,
                 fontFamily: "'DM Sans', sans-serif",
               }}
             >
-              Continue &rarr;
+              {clarifyLoading ? "Loading..." : "Continue \u2192"}
             </button>
           </div>
         )}
@@ -2215,15 +1678,17 @@ export default function Home() {
                   ) : (
                     <button
                       onClick={handleCompile}
+                      disabled={compileStartTime !== null}
                       style={{
                         padding: "10px 28px",
                         border: "none",
                         borderRadius: 10,
-                        background: PRIMARY,
+                        background: compileStartTime !== null ? "#ccc" : PRIMARY,
                         color: "#fff",
                         fontSize: 14,
                         fontWeight: 600,
-                        cursor: "pointer",
+                        cursor: compileStartTime !== null ? "not-allowed" : "pointer",
+                        opacity: compileStartTime !== null ? 0.6 : 1,
                         fontFamily: "'DM Sans', sans-serif",
                       }}
                     >
@@ -2247,6 +1712,22 @@ export default function Home() {
                     }}
                   >
                     Skip all
+                  </button>
+                  <div style={{ flex: 1 }} />
+                  <button
+                    onClick={() => setStep("input")}
+                    style={{
+                      padding: "10px 16px",
+                      border: `1px solid ${BORDER}`,
+                      borderRadius: 10,
+                      background: "transparent",
+                      color: TEXT_LIGHT,
+                      fontSize: 13,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    &larr; Back to brief
                   </button>
                 </div>
               </div>
@@ -2303,6 +1784,21 @@ export default function Home() {
                     }}
                   >
                     Try again
+                  </button>
+                  <button
+                    onClick={() => setStep("input")}
+                    style={{
+                      padding: "10px 16px",
+                      border: `1px solid ${BORDER}`,
+                      borderRadius: 10,
+                      background: "transparent",
+                      color: TEXT_LIGHT,
+                      fontSize: 13,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    &larr; Back to brief
                   </button>
                 </div>
               </div>
@@ -2397,17 +1893,71 @@ export default function Home() {
 
         {/* ─── REVEAL ─── */}
         {step === "reveal" && plan && (() => {
-          // Find the "one thing" — first pending task for the user to act on
+          // Find the "one thing" — smart scheduling + energy-aware
           const allCurrentTasks = getAllTasks(currentNodes);
-          const oneThingTask = allCurrentTasks.find(
-            (t) => t.status === "pending" && (t.assignee === "user" || t.assignee === "hybrid")
-          ) || allCurrentTasks.find(
-            (t) => t.status === "pending"
+          const pendingTasks = allCurrentTasks.filter((t) => t.status === "pending");
+          const pendingHumanTasks = pendingTasks.filter(
+            (t) => t.assignee === "user" || t.assignee === "hybrid"
           );
+          // Score all pending tasks by project management best practices
+          const scoredTasks = scoreTasks(
+            pendingHumanTasks.length > 0 ? pendingHumanTasks : pendingTasks,
+            allTasks,
+            currentEnergy,
+            projectPriority,
+          );
+
+          // Apply focus category filter
+          const focusFilteredScored = focusCategory === "all"
+            ? scoredTasks
+            : scoredTasks.filter((sp) => inferCategory(sp.task) === focusCategory);
+          // Fall back to top unfiltered task if no matches
+          const effectiveScored = focusFilteredScored.length > 0 ? focusFilteredScored : scoredTasks;
+
+          const topPriority = effectiveScored[0];
+          const oneThingTask: Task | undefined = topPriority?.task;
+          const oneThingReasons = topPriority?.reasons || [];
           const allDone = allCurrentTasks.every((t) => doneIds.has(t.id));
+
+          // Categories present in current tasks
+          const presentCategories = Array.from(new Set(
+            allCurrentTasks
+              .filter((t) => t.status === "pending")
+              .map((t) => inferCategory(t))
+          ));
+
+          // Quick-detour: find a quick task with long wait to suggest
+          const detourTask = !detourDismissed && oneThingTask ? (() => {
+            const candidates = allCurrentTasks.filter((t) =>
+              t.status === "pending" &&
+              t.id !== oneThingTask.id &&
+              t.has_wait_after &&
+              (t.estimated_wait === "days" || t.estimated_wait === "weeks") &&
+              t.energy === "low"
+            );
+            return candidates[0] || null;
+          })() : null;
 
           return (
           <div>
+            {/* Welcome back recap */}
+            {welcomeBackData && showWelcomeBack && (
+              <WelcomeBack
+                minutesAway={welcomeBackData.minutesAway}
+                totalTasks={welcomeBackData.totalTasks}
+                completedTasks={welcomeBackData.completedTasks}
+                lastCompletedTitle={welcomeBackData.lastCompletedTitle}
+                nextTaskTitle={welcomeBackData.nextTaskTitle}
+                nextTaskReason={welcomeBackData.nextTaskReason}
+                agentCompletedTitles={welcomeBackData.agentCompletedTitles}
+                onDismiss={() => {
+                  setShowWelcomeBack(false);
+                  if (savedPlanId) {
+                    localStorage.setItem(`letsbegin-last-visit-${savedPlanId}`, String(Date.now()));
+                  }
+                }}
+              />
+            )}
             {/* Mode toggle */}
             <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
               <button
@@ -2448,38 +1998,197 @@ export default function Home() {
               </span>
             </div>
 
+            {/* Focus category filter */}
+            {presentCategories.length > 1 && (
+              <div style={{ display: "flex", gap: 6, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11, color: "#aaa", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Focus</span>
+                <button
+                  onClick={() => setFocusCategory("all")}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 6,
+                    border: "none",
+                    background: focusCategory === "all" ? PRIMARY : BORDER,
+                    color: focusCategory === "all" ? "#fff" : "#666",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  All
+                </button>
+                {presentCategories.map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setFocusCategory(cat)}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 6,
+                      border: "none",
+                      background: focusCategory === cat ? PRIMARY : BORDER,
+                      color: focusCategory === cat ? "#fff" : "#666",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                      textTransform: "capitalize",
+                    }}
+                  >
+                    {CATEGORY_ICONS[cat]} {cat}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* ─── ONE THING MODE ─── */}
             {revealMode === "onething" && (
               <div>
-                {/* Compact progress bar */}
-                <div
-                  style={{
-                    width: "100%",
-                    height: 4,
-                    background: BORDER,
-                    borderRadius: 2,
-                    overflow: "hidden",
-                    marginBottom: 28,
-                  }}
-                >
+                {/* Encouragement toast */}
+                {showEncouragement && (
+                  <div style={{
+                    padding: "10px 16px",
+                    borderRadius: 10,
+                    background: "#2DA44E12",
+                    border: "1px solid #2DA44E30",
+                    color: "#2DA44E",
+                    fontSize: 14,
+                    fontWeight: 500,
+                    marginBottom: 16,
+                    textAlign: "center",
+                    animation: "fadeIn 0.3s ease",
+                  }}>
+                    {showEncouragement}
+                    {streak >= 2 && streak <= 5 && (
+                      <span style={{ display: "block", fontSize: 12, marginTop: 2, opacity: 0.8 }}>
+                        {streakEncouragements[streak] || `${streak} tasks in a row!`}
+                      </span>
+                    )}
+                    {streak > 5 && (
+                      <span style={{ display: "block", fontSize: 12, marginTop: 2, opacity: 0.8 }}>
+                        {streak} tasks straight. You&apos;re unstoppable.
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Break reminder */}
+                {showBreakReminder && !showEncouragement && (
+                  <div style={{
+                    padding: "12px 16px",
+                    borderRadius: 10,
+                    background: "#D4A72C0a",
+                    border: "1px solid #D4A72C25",
+                    marginBottom: 16,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#D4A72C" }}>
+                        Nice streak! Maybe take a quick break?
+                      </div>
+                      <div style={{ fontSize: 12, color: TEXT_LIGHT }}>
+                        You&apos;ve done {streak} tasks. A short break helps you stay focused.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setShowBreakReminder(false)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: TEXT_LIGHT,
+                        fontSize: 18,
+                        cursor: "pointer",
+                        padding: "0 4px",
+                      }}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                )}
+
+                {/* Progress bar with streak dots */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
                   <div
                     style={{
-                      width: `${total > 0 ? (doneCount / total) * 100 : 0}%`,
-                      height: "100%",
-                      background: PRIMARY,
-                      borderRadius: 2,
-                      transition: "width 0.4s ease",
+                      flex: 1,
+                      height: 6,
+                      background: BORDER,
+                      borderRadius: 3,
+                      overflow: "hidden",
                     }}
-                  />
+                  >
+                    <div
+                      style={{
+                        width: `${total > 0 ? (doneCount / total) * 100 : 0}%`,
+                        height: "100%",
+                        background: PRIMARY,
+                        borderRadius: 3,
+                        transition: "width 0.4s ease",
+                      }}
+                    />
+                  </div>
+                  <span style={{ fontSize: 13, color: TEXT_LIGHT, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+                    {doneCount} of {total}
+                  </span>
                 </div>
+
+                {/* Energy check-in (only show if multiple tasks available) */}
+                {pendingHumanTasks.length > 1 && !allDone && (
+                  <div style={{
+                    marginBottom: 20,
+                    padding: "12px 16px",
+                    borderRadius: 10,
+                    background: SURFACE,
+                    border: `1px solid ${BORDER}`,
+                  }}>
+                    <div style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 8 }}>
+                      How&apos;s your energy right now?
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {([
+                        { level: "low" as Energy, label: "Low — give me something easy", color: "#2DA44E" },
+                        { level: "medium" as Energy, label: "Okay — moderate is fine", color: "#D4A72C" },
+                        { level: "high" as Energy, label: "Good — bring it on", color: "#CF522E" },
+                      ]).map(({ level, label, color }) => (
+                        <button
+                          key={level}
+                          onClick={() => setCurrentEnergy(level)}
+                          style={{
+                            flex: 1,
+                            padding: "8px 10px",
+                            borderRadius: 8,
+                            border: currentEnergy === level ? `2px solid ${color}` : `1px solid ${BORDER}`,
+                            background: currentEnergy === level ? `${color}0a` : "transparent",
+                            color: currentEnergy === level ? color : TEXT_LIGHT,
+                            fontSize: 12,
+                            fontWeight: currentEnergy === level ? 600 : 400,
+                            cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif",
+                            transition: "all 0.15s",
+                          }}
+                        >
+                          <span style={{ display: "block", width: 8, height: 8, borderRadius: "50%", background: color, margin: "0 auto 4px" }} />
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {allDone ? (
                   <div style={{ textAlign: "center", padding: "40px 0" }}>
                     <div style={{ fontSize: 48, marginBottom: 12 }}>&#x1F389;</div>
                     <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>All done!</h2>
-                    <p style={{ color: "#787774", fontSize: 15 }}>
+                    <p style={{ color: "#787774", fontSize: 15, marginBottom: 4 }}>
                       Every task in your plan is complete.
                     </p>
+                    {streak > 0 && (
+                      <p style={{ color: "#2DA44E", fontSize: 14, fontWeight: 500 }}>
+                        You completed {streak} task{streak !== 1 ? "s" : ""} this session.
+                      </p>
+                    )}
                     <button
                       onClick={() => setRevealMode("project")}
                       style={{
@@ -2500,14 +2209,35 @@ export default function Home() {
                   </div>
                 ) : oneThingTask ? (
                   <div>
-                    <div style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 8 }}>
-                      Your next task:
+                    {/* Gentle, focused header */}
+                    <div style={{ fontSize: 14, color: TEXT_LIGHT, marginBottom: 4 }}>
+                      {oneThingTask.assignee === "user" ? "Focus on this one thing:" : "Next up:"}
                     </div>
+                    {/* Smart scheduling reasons */}
+                    {oneThingReasons.length > 0 && (
+                      <div style={{ fontSize: 11, color: PRIMARY, marginBottom: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {oneThingReasons.map((reason, i) => (
+                          <span key={i} style={{
+                            padding: "2px 8px", borderRadius: 5,
+                            background: `${PRIMARY}10`, fontSize: 11,
+                          }}>
+                            {reason}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {oneThingTask.energy && oneThingReasons.length === 0 && (
+                      <div style={{ fontSize: 11, color: ENERGY_COLORS[oneThingTask.energy], marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: ENERGY_COLORS[oneThingTask.energy] }} />
+                        {oneThingTask.energy === "low" ? "Quick one" : oneThingTask.energy === "medium" ? "Moderate effort" : "This one takes focus"}
+                      </div>
+                    )}
                     <TaskCard
                       task={oneThingTask}
                       result={results[oneThingTask.id]}
                       onMarkDone={markDone}
                       onRunAgent={handleRunAgent}
+                      onAddNote={addNote}
                       projectSummary={plan?.summary || brief}
                       autoExpandSubtasks
                       doneSubtaskIds={doneSubtaskIds}
@@ -2523,7 +2253,76 @@ export default function Home() {
                             .join("\n") || "",
                         }))}
                       allTasksList={allTasks}
+                      executionMode={executionMode}
+                      userTools={userTools}
+                      onEditTask={editTask}
+                      onDecompose={handleDecompose}
+                      doneIds={doneIds}
+                      currentNodes={currentNodes}
                     />
+
+                    {/* "I'm stuck" button — opens chat with a gentler first message */}
+                    {oneThingTask.assignee === "user" && (
+                      <div style={{ marginTop: 12, textAlign: "center" }}>
+                        <button
+                          onClick={() => {
+                            // This opens the task chat if not already open
+                            const chatBtn = document.querySelector(`[data-task-chat="${oneThingTask.id}"]`) as HTMLButtonElement;
+                            if (chatBtn) chatBtn.click();
+                          }}
+                          style={{
+                            background: "none",
+                            border: `1px dashed ${BORDER}`,
+                            borderRadius: 8,
+                            padding: "8px 16px",
+                            fontSize: 12,
+                            color: TEXT_LIGHT,
+                            cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif",
+                          }}
+                        >
+                          Feeling stuck? Get help breaking this down further
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Quick detour suggestion */}
+                    {detourTask && (
+                      <div style={{
+                        marginTop: 14,
+                        padding: "10px 14px",
+                        borderRadius: 8,
+                        border: `1px dashed ${BORDER}`,
+                        background: "#FAFAF9",
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 10,
+                      }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 11, color: "#D4A72C", fontWeight: 600, marginBottom: 3 }}>
+                            Quick detour
+                          </div>
+                          <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
+                            {detourTask.title} &mdash; do this now to avoid a {detourTask.estimated_wait === "weeks" ? "multi-week" : "multi-day"} wait later
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setDetourDismissed(true)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#B0AFA8",
+                            fontSize: 14,
+                            cursor: "pointer",
+                            padding: "0 2px",
+                            lineHeight: 1,
+                            flexShrink: 0,
+                          }}
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    )}
 
                     {/* What's happening in the background */}
                     {runningCount > 0 && (
@@ -2608,6 +2407,11 @@ export default function Home() {
                       {runningCount > 0 && (
                         <div style={{ fontSize: 13, color: PRIMARY, fontWeight: 500 }}>
                           {runningCount === 1 ? "An agent is working on a task..." : `${runningCount} agents are working...`}
+                        </div>
+                      )}
+                      {runningCount === 0 && (
+                        <div style={{ fontSize: 13, color: TEXT_LIGHT }}>
+                          Waiting for dependencies to unlock new tasks.
                         </div>
                       )}
                     </div>
@@ -2698,6 +2502,8 @@ export default function Home() {
                     })()}
                   </div>
                 )}
+
+                <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
               </div>
             )}
 
@@ -2714,16 +2520,57 @@ export default function Home() {
                     marginBottom: 24,
                   }}
                 >
-                  <h2 style={{ fontSize: 20, fontWeight: 700, marginTop: 0, marginBottom: 8 }}>
-                    {plan.project_title}
-                  </h2>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                    <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>
+                      {plan.project_title}
+                    </h2>
+                    <div style={{ display: "flex", gap: 2 }}>
+                      {(["high", "medium", "low"] as const).map((p) => {
+                        const labels = { high: "H", medium: "M", low: "L" };
+                        const colors = { high: "#CF522E", medium: "#D4A72C", low: "#2DA44E" };
+                        const isActive = projectPriority === p;
+                        return (
+                          <button
+                            key={p}
+                            onClick={() => setProjectPriority(p)}
+                            title={`${p} priority`}
+                            style={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: 5,
+                              border: isActive ? `1.5px solid ${colors[p]}` : `1px solid ${BORDER}`,
+                              background: isActive ? `${colors[p]}18` : "transparent",
+                              color: isActive ? colors[p] : TEXT_LIGHT,
+                              fontSize: 10,
+                              fontWeight: 700,
+                              cursor: "pointer",
+                              fontFamily: "'DM Sans', sans-serif",
+                              padding: 0,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            {labels[p]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                   <p style={{ fontSize: 14, color: "#787774", lineHeight: 1.6, marginBottom: 14 }}>
                     {plan.summary}
                   </p>
-                  <div style={{ display: "flex", gap: 16, fontSize: 13, color: TEXT_LIGHT }}>
-                    <span>
-                      <strong style={{ color: PRIMARY }}>{agentCount}</strong> agent
-                    </span>
+                  <div style={{ display: "flex", gap: 16, fontSize: 13, color: TEXT_LIGHT, flexWrap: "wrap", alignItems: "center" }}>
+                    {claudeCodeCount > 0 && (
+                      <span>
+                        <strong style={{ color: "#C4841D" }}>{claudeCodeCount}</strong> Claude Code
+                      </span>
+                    )}
+                    {builtinAgentCount > 0 && (
+                      <span>
+                        <strong style={{ color: PRIMARY }}>{builtinAgentCount}</strong> agent
+                      </span>
+                    )}
                     <span>
                       <strong style={{ color: "#C4841D" }}>{hybridCount}</strong> hybrid
                     </span>
@@ -2733,6 +2580,37 @@ export default function Home() {
                     <span>
                       <strong style={{ color: TEXT }}>{total}</strong> total
                     </span>
+                    {executionMode === "byo" && userTools.available.length > 0 && (
+                      <span
+                        style={{
+                          padding: "2px 8px", borderRadius: 5,
+                          background: "#E8F0FE", color: "#1967D2",
+                          fontSize: 11, fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                        onClick={() => { setExecutionMode("api"); setUserTools({ available: [] }); }}
+                        title="Click to switch to API mode (agents run automatically)"
+                      >
+                        Using your tools ({userTools.available.length}) — click to switch
+                      </span>
+                    )}
+                    {executionMode === "api" && userTools.available.length === 0 && (claudeCodeCount > 0 || builtinAgentCount > 0) && (
+                      <span
+                        style={{
+                          padding: "2px 8px", borderRadius: 5,
+                          background: `${PRIMARY}14`, color: PRIMARY,
+                          fontSize: 11, fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                        onClick={() => {
+                          setUserTools({ available: ["claude-code"] });
+                          setExecutionMode("byo");
+                        }}
+                        title="Switch to BYO mode — use your own AI tools"
+                      >
+                        Have your own AI tools? Switch to BYO
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -2788,20 +2666,137 @@ export default function Home() {
                       </button>
                     ))}
                   </div>
+                  <button
+                    onClick={() => setShowAddTask(!showAddTask)}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 6,
+                      border: `1px dashed ${BORDER}`,
+                      background: "transparent",
+                      color: TEXT_LIGHT,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    + Add task
+                  </button>
                 </div>
+
+                {showAddTask && (
+                  <div style={{
+                    background: SURFACE,
+                    borderRadius: 10,
+                    padding: 16,
+                    border: `1px solid ${BORDER}`,
+                    marginBottom: 16,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}>
+                    <input
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      placeholder="Task title"
+                      style={{
+                        padding: "8px 10px", fontSize: 13, borderRadius: 6,
+                        border: `1px solid ${BORDER}`, outline: "none",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    />
+                    <textarea
+                      value={newTaskDesc}
+                      onChange={(e) => setNewTaskDesc(e.target.value)}
+                      placeholder="Description (optional)"
+                      style={{
+                        padding: "8px 10px", fontSize: 12, borderRadius: 6,
+                        border: `1px solid ${BORDER}`, outline: "none",
+                        fontFamily: "'DM Sans', sans-serif", resize: "vertical",
+                        minHeight: 40,
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <select
+                        value={newTaskAssignee}
+                        onChange={(e) => setNewTaskAssignee(e.target.value as Assignee)}
+                        style={{ padding: "4px 8px", fontSize: 12, borderRadius: 6, border: `1px solid ${BORDER}`, fontFamily: "'DM Sans', sans-serif" }}
+                      >
+                        <option value="user">You</option>
+                        <option value="agent">Agent</option>
+                        <option value="hybrid">Hybrid</option>
+                      </select>
+                      <select
+                        value={newTaskEnergy}
+                        onChange={(e) => setNewTaskEnergy(e.target.value as Energy)}
+                        style={{ padding: "4px 8px", fontSize: 12, borderRadius: 6, border: `1px solid ${BORDER}`, fontFamily: "'DM Sans', sans-serif" }}
+                      >
+                        <option value="low">Low effort</option>
+                        <option value="medium">Medium effort</option>
+                        <option value="high">High effort</option>
+                      </select>
+                      <input
+                        type="date"
+                        value={newTaskDeadline}
+                        onChange={(e) => setNewTaskDeadline(e.target.value)}
+                        style={{ padding: "4px 8px", fontSize: 12, borderRadius: 6, border: `1px solid ${BORDER}`, fontFamily: "'DM Sans', sans-serif" }}
+                        title="Deadline (optional)"
+                      />
+                      <button
+                        onClick={() => {
+                          if (!newTaskTitle.trim()) return;
+                          const dl = newTaskDeadline ? new Date(newTaskDeadline + "T23:59:59").toISOString() : undefined;
+                          addNewTask(newTaskTitle.trim(), newTaskDesc.trim(), newTaskAssignee, newTaskEnergy, dl);
+                          setNewTaskTitle("");
+                          setNewTaskDesc("");
+                          setNewTaskDeadline("");
+                          setShowAddTask(false);
+                        }}
+                        disabled={!newTaskTitle.trim()}
+                        style={{
+                          padding: "6px 16px", border: "none", borderRadius: 6,
+                          background: newTaskTitle.trim() ? PRIMARY : "#ccc",
+                          color: "#fff", fontSize: 12, fontWeight: 600,
+                          cursor: newTaskTitle.trim() ? "pointer" : "not-allowed",
+                          fontFamily: "'DM Sans', sans-serif",
+                        }}
+                      >
+                        Add
+                      </button>
+                      <button
+                        onClick={() => setShowAddTask(false)}
+                        style={{
+                          padding: "6px 12px", border: "none", borderRadius: 6,
+                          background: "transparent", color: TEXT_LIGHT, fontSize: 12,
+                          cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* DAG view */}
                 <DagView
                   nodes={currentNodes}
                   energyFilter={energyFilter}
                   assigneeFilter={assigneeFilter}
+                  focusCategory={focusCategory}
                   results={results}
                   onMarkDone={markDone}
                   onRunAgent={handleRunAgent}
+                  onAddNote={addNote}
                   projectSummary={plan?.summary || brief}
                   doneSubtaskIds={doneSubtaskIds}
                   onToggleSubtask={toggleSubtask}
                   allTasks={allTasks}
+                  executionMode={executionMode}
+                  userTools={userTools}
+                  onEditTask={editTask}
+                  onDecompose={handleDecompose}
+                  doneIds={doneIds}
+                  currentNodes={currentNodes}
                 />
               </div>
             )}
@@ -2809,6 +2804,44 @@ export default function Home() {
           );
         })()}
       </main>
+
+      {/* Undo toast */}
+      {undoToast && (
+        <div style={{
+          position: "fixed",
+          bottom: 24,
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "#37352F",
+          color: "#fff",
+          padding: "12px 20px",
+          borderRadius: 10,
+          fontSize: 14,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          zIndex: 1000,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+        }}>
+          <span>Task completed.</span>
+          <button
+            onClick={() => unmarkDone(undoToast.id)}
+            style={{
+              background: "none",
+              border: "none",
+              color: PRIMARY,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "'DM Sans', sans-serif",
+              textDecoration: "underline",
+              padding: 0,
+            }}
+          >
+            Undo
+          </button>
+        </div>
+      )}
     </div>
   );
 }

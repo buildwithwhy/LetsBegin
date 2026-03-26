@@ -1,0 +1,20 @@
+{
+  "name": "letsbegin-mcp-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@supabase/supabase-js": "^2.99.3",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.19.4",
+    "typescript": "^5.7.3"
+  }
+}

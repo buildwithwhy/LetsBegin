@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import type { Plan, DagNode } from "@/lib/dag";
+import type { Plan, DagNode, ProjectPriority } from "@/lib/dag";
 
 interface StoredPlan {
   id: string;
@@ -12,13 +12,14 @@ interface StoredPlan {
   nodes: DagNode[];
   done_ids: string[];
   done_subtask_ids: string[];
+  priority: ProjectPriority;
   created_at: string;
   updated_at: string;
 }
 
 export function usePlanStorage(userId: string | undefined) {
   const savePlan = useCallback(
-    async (brief: string, plan: Plan, doneIds: Set<string>, doneSubtaskIds: Set<string>) => {
+    async (brief: string, plan: Plan, doneIds: Set<string>, doneSubtaskIds: Set<string>, priority: ProjectPriority = "medium") => {
       if (!userId) return null;
 
       // Check if a plan for this brief already exists
@@ -39,6 +40,7 @@ export function usePlanStorage(userId: string | undefined) {
             nodes: plan.nodes,
             done_ids: Array.from(doneIds),
             done_subtask_ids: Array.from(doneSubtaskIds),
+            priority,
             updated_at: new Date().toISOString(),
           })
           .eq("id", existing[0].id)
@@ -58,6 +60,7 @@ export function usePlanStorage(userId: string | undefined) {
             nodes: plan.nodes,
             done_ids: Array.from(doneIds),
             done_subtask_ids: Array.from(doneSubtaskIds),
+            priority,
           })
           .select()
           .single();
