@@ -130,7 +130,13 @@ export function routeTask(
   return { method: "api", tool: "our-api", label: "Auto", icon: "\u26A1", promptStyle: "generic" };
 }
 
-export type Step = "dashboard" | "input" | "clarify" | "compiling" | "reveal";
+export type Step = "dashboard" | "onboarding" | "input" | "clarify" | "compiling" | "reveal";
+
+export type UserProfile = {
+  mode: "planner" | "builder" | "full" | null;
+  hasAiTools: boolean;
+  setupMcp: boolean;
+};
 
 export type ClarifyQuestion = {
   id: string;
