@@ -23,7 +23,7 @@ import { templates, type ProjectTemplate } from "@/lib/templates";
 import {
   PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, ENERGY_COLORS,
   type ExecutionMode, type Step, type ClarifyQuestion, type PriorResult,
-  type UserToolConfig, type UserTool, TOOL_CAPABILITIES,
+  type UserToolConfig, type UserTool, TOOL_CAPABILITIES, type UserProfile,
 } from "@/lib/styles";
 import { Header } from "@/components/Header";
 import { ThinkingTerminal } from "@/components/ThinkingTerminal";
@@ -102,6 +102,34 @@ export default function Home() {
   const [focusCategory, setFocusCategory] = useState<TaskCategory | "all">("all");
   const [detourDismissed, setDetourDismissed] = useState(false);
 
+  // Onboarding state
+  const [hasOnboarded, setHasOnboarded] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("letsbegin-onboarded");
+      if (saved !== null) return saved === "true";
+      // If user already has tools configured, treat as onboarded
+      try {
+        const tools = localStorage.getItem("letsbegin-user-tools");
+        if (tools) {
+          const parsed = JSON.parse(tools);
+          if (parsed.available && parsed.available.length > 0) return true;
+        }
+      } catch {}
+    }
+    return false;
+  });
+  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("letsbegin-user-profile");
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    return { mode: null, hasAiTools: false, setupMcp: false };
+  });
+  const [onboardingScreen, setOnboardingScreen] = useState<1 | 2 | 3>(1);
+  const [onboardingTools, setOnboardingTools] = useState<UserTool[]>([]);
+
   // BYO clarify/plan state
   const [byoClarifyPrompt, setByoClarifyPrompt] = useState("");
   const [byoPlanPrompt, setByoPlanPrompt] = useState("");
@@ -142,6 +170,16 @@ export default function Home() {
 
   const { execute, results, running, runningCount } = useAgentExecutor();
 
+  // Trigger onboarding for new users after login
+  useEffect(() => {
+    if (user && !hasOnboarded && step === "dashboard") {
+      setOnboardingScreen(1);
+      setOnboardingTools([]);
+      setStep("onboarding");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, hasOnboarded]);
+
   // Load saved plans for dashboard
   useEffect(() => {
     if (user && step === "dashboard") {
@@ -167,6 +205,32 @@ export default function Home() {
       localStorage.setItem("letsbegin-execution-mode", executionMode);
     }
   }, [executionMode]);
+
+  // Persist hasOnboarded to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("letsbegin-onboarded", String(hasOnboarded));
+    }
+  }, [hasOnboarded]);
+
+  // Persist userProfile to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("letsbegin-user-profile", JSON.stringify(userProfile));
+    }
+  }, [userProfile]);
+
+  // Apply profile-based defaults on mount or profile change
+  useEffect(() => {
+    if (userProfile.mode === "planner") {
+      setJustMeMode(true);
+    } else if (userProfile.mode === "full") {
+      setExecutionMode("api");
+    } else if (userProfile.mode === "builder") {
+      setExecutionMode("byo");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userProfile.mode]);
 
   // Persist globalFocusMode to localStorage
   useEffect(() => {
@@ -1646,9 +1710,32 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
             )}
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-              <h1 style={{ fontSize: 28, fontWeight: 700, color: TEXT, margin: 0 }}>
-                Your projects
-              </h1>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+                <h1 style={{ fontSize: 28, fontWeight: 700, color: TEXT, margin: 0 }}>
+                  Your projects
+                </h1>
+                <button
+                  onClick={() => {
+                    setHasOnboarded(false);
+                    setOnboardingScreen(1);
+                    setOnboardingTools(userTools.available ? [...userTools.available] : []);
+                    setStep("onboarding");
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: TEXT_LIGHT,
+                    fontSize: 12,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                    textDecoration: "underline",
+                    textUnderlineOffset: 3,
+                    padding: 0,
+                  }}
+                >
+                  Change setup
+                </button>
+              </div>
               <button
                 onClick={startNewProject}
                 style={{
@@ -2091,6 +2178,407 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
             <p style={{ textAlign: "center", fontSize: 11, color: "#B0AFA8", marginTop: 24 }}>
               Free to use. Bring your own AI tools to save on API costs.
             </p>
+          </div>
+        )}
+
+        {/* ─── ONBOARDING ─── */}
+        {(user || !authConfigured) && step === "onboarding" && (
+          <div style={{ maxWidth: 560, margin: "0 auto" }}>
+            {/* Screen 1: How do you want to use AI? */}
+            {onboardingScreen === 1 && (
+              <div>
+                <h1 style={{ fontSize: 32, fontWeight: 700, color: TEXT, marginBottom: 8, textAlign: "center", fontFamily: "'DM Sans', sans-serif" }}>
+                  How do you want to use AI?
+                </h1>
+                <p style={{ fontSize: 16, color: TEXT_LIGHT, marginBottom: 36, textAlign: "center", fontFamily: "'DM Sans', sans-serif", lineHeight: 1.6 }}>
+                  Pick the style that fits you best. You can always change this later.
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {/* Planner card */}
+                  <button
+                    onClick={() => {
+                      setUserProfile({ mode: "planner", hasAiTools: false, setupMcp: false });
+                      setExecutionMode("byo");
+                      setJustMeMode(true);
+                      setOnboardingScreen(3);
+                    }}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "28px 28px",
+                      borderRadius: 16,
+                      border: `2px solid ${BORDER}`,
+                      background: SURFACE,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                      transition: "border-color 0.15s, box-shadow 0.15s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = PRIMARY; e.currentTarget.style.boxShadow = `0 0 0 1px ${PRIMARY}20`; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.boxShadow = "none"; }}
+                  >
+                    <div style={{ fontSize: 32, marginBottom: 12 }}>📋</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 6 }}>I just want a plan</div>
+                    <div style={{ fontSize: 15, color: TEXT_LIGHT, lineHeight: 1.5 }}>
+                      Give me a smart plan for my projects. I&apos;ll handle execution myself or with my own tools.
+                    </div>
+                  </button>
+
+                  {/* Builder card */}
+                  <button
+                    onClick={() => {
+                      setUserProfile((prev) => ({ ...prev, mode: "builder", hasAiTools: true }));
+                      setOnboardingScreen(2);
+                    }}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "28px 28px",
+                      borderRadius: 16,
+                      border: `2px solid ${BORDER}`,
+                      background: SURFACE,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                      transition: "border-color 0.15s, box-shadow 0.15s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = PRIMARY; e.currentTarget.style.boxShadow = `0 0 0 1px ${PRIMARY}20`; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.boxShadow = "none"; }}
+                  >
+                    <div style={{ fontSize: 32, marginBottom: 12 }}>🔗</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 6 }}>I have AI tools — coordinate them</div>
+                    <div style={{ fontSize: 15, color: TEXT_LIGHT, lineHeight: 1.5 }}>
+                      I already use Claude Code, ChatGPT, Gemini, etc. Route tasks to my tools and save me API costs.
+                    </div>
+                  </button>
+
+                  {/* Full card */}
+                  <button
+                    onClick={() => {
+                      setUserProfile({ mode: "full", hasAiTools: false, setupMcp: false });
+                      setExecutionMode("api");
+                      setOnboardingScreen(3);
+                    }}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "28px 28px",
+                      borderRadius: 16,
+                      border: `2px solid ${BORDER}`,
+                      background: SURFACE,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                      transition: "border-color 0.15s, box-shadow 0.15s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = PRIMARY; e.currentTarget.style.boxShadow = `0 0 0 1px ${PRIMARY}20`; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.boxShadow = "none"; }}
+                  >
+                    <div style={{ fontSize: 32, marginBottom: 12 }}>⚡</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 6 }}>Just make it work</div>
+                    <div style={{ fontSize: 15, color: TEXT_LIGHT, lineHeight: 1.5 }}>
+                      Use your AI to plan and execute. I&apos;ll handle the human parts.
+                    </div>
+                  </button>
+                </div>
+                <div style={{ textAlign: "center", marginTop: 24 }}>
+                  <button
+                    onClick={() => {
+                      setHasOnboarded(true);
+                      setStep("dashboard");
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: TEXT_LIGHT,
+                      fontSize: 13,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                      textDecoration: "underline",
+                      textUnderlineOffset: 3,
+                    }}
+                  >
+                    Skip
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Screen 2: What do you have? (tool selection) */}
+            {onboardingScreen === 2 && (
+              <div>
+                <h1 style={{ fontSize: 32, fontWeight: 700, color: TEXT, marginBottom: 8, textAlign: "center", fontFamily: "'DM Sans', sans-serif" }}>
+                  What do you have?
+                </h1>
+                <p style={{ fontSize: 16, color: TEXT_LIGHT, marginBottom: 36, textAlign: "center", fontFamily: "'DM Sans', sans-serif", lineHeight: 1.6 }}>
+                  Select the AI tools you already have access to. We&apos;ll pick the best one for each job.
+                </p>
+
+                {/* Subscriptions group */}
+                <div style={{ marginBottom: 28 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: TEXT_LIGHT, textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 12, fontFamily: "'DM Sans', sans-serif" }}>
+                    Subscriptions
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    {(["claude-code", "claude-cowork", "claude-max", "chatgpt-plus", "gemini-pro"] as UserTool[]).map((tool) => {
+                      const cap = TOOL_CAPABILITIES[tool];
+                      const isSelected = onboardingTools.includes(tool);
+                      return (
+                        <button
+                          key={tool}
+                          onClick={() => {
+                            setOnboardingTools((prev) =>
+                              isSelected ? prev.filter((t) => t !== tool) : [...prev, tool]
+                            );
+                          }}
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: 12,
+                            padding: "16px 16px",
+                            borderRadius: 12,
+                            border: `2px solid ${isSelected ? PRIMARY : BORDER}`,
+                            background: isSelected ? `${PRIMARY}08` : SURFACE,
+                            cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif",
+                            textAlign: "left",
+                            transition: "border-color 0.15s",
+                            position: "relative" as const,
+                          }}
+                          onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.borderColor = `${PRIMARY}60`; }}
+                          onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.borderColor = BORDER; }}
+                        >
+                          {isSelected && (
+                            <div style={{ position: "absolute", top: 8, right: 8, fontSize: 14, color: PRIMARY }}>✓</div>
+                          )}
+                          <div style={{ fontSize: 24, flexShrink: 0 }}>{cap.icon}</div>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 2 }}>{cap.label}</div>
+                            <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
+                              {cap.strengths.join(", ")}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* API Keys group */}
+                <div style={{ marginBottom: 32 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: TEXT_LIGHT, textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 12, fontFamily: "'DM Sans', sans-serif" }}>
+                    API Keys
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    {(["api-anthropic", "api-google", "api-openai"] as UserTool[]).map((tool) => {
+                      const cap = TOOL_CAPABILITIES[tool];
+                      const isSelected = onboardingTools.includes(tool);
+                      return (
+                        <button
+                          key={tool}
+                          onClick={() => {
+                            setOnboardingTools((prev) =>
+                              isSelected ? prev.filter((t) => t !== tool) : [...prev, tool]
+                            );
+                          }}
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: 12,
+                            padding: "16px 16px",
+                            borderRadius: 12,
+                            border: `2px solid ${isSelected ? PRIMARY : BORDER}`,
+                            background: isSelected ? `${PRIMARY}08` : SURFACE,
+                            cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif",
+                            textAlign: "left",
+                            transition: "border-color 0.15s",
+                            position: "relative" as const,
+                          }}
+                          onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.borderColor = `${PRIMARY}60`; }}
+                          onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.borderColor = BORDER; }}
+                        >
+                          {isSelected && (
+                            <div style={{ position: "absolute", top: 8, right: 8, fontSize: 14, color: PRIMARY }}>✓</div>
+                          )}
+                          <div style={{ fontSize: 24, flexShrink: 0 }}>{cap.icon}</div>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 2 }}>{cap.label}</div>
+                            <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
+                              {cap.strengths.join(", ")}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <p style={{ fontSize: 14, color: TEXT_LIGHT, textAlign: "center", marginBottom: 24, fontFamily: "'DM Sans', sans-serif", lineHeight: 1.5 }}>
+                  These tools will handle your AI tasks. We&apos;ll pick the best one for each job.
+                </p>
+
+                {onboardingTools.length > 0 && (
+                  <button
+                    onClick={() => {
+                      setUserTools({ available: onboardingTools });
+                      setExecutionMode("byo");
+                      setUserProfile((prev) => ({ ...prev, hasAiTools: true }));
+                      setOnboardingScreen(3);
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "16px 24px",
+                      borderRadius: 12,
+                      border: "none",
+                      background: PRIMARY,
+                      color: "#fff",
+                      fontSize: 16,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    Continue →
+                  </button>
+                )}
+
+                <div style={{ textAlign: "center", marginTop: 16 }}>
+                  <button
+                    onClick={() => setOnboardingScreen(1)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: TEXT_LIGHT,
+                      fontSize: 13,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                      textDecoration: "underline",
+                      textUnderlineOffset: 3,
+                    }}
+                  >
+                    ← Back
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Screen 3: You're all set! */}
+            {onboardingScreen === 3 && (
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 48, marginBottom: 16 }}>🎉</div>
+                <h1 style={{ fontSize: 32, fontWeight: 700, color: TEXT, marginBottom: 12, fontFamily: "'DM Sans', sans-serif" }}>
+                  You&apos;re all set!
+                </h1>
+
+                <div style={{
+                  padding: "20px 24px",
+                  borderRadius: 14,
+                  background: `${PRIMARY}06`,
+                  border: `1px solid ${BORDER}`,
+                  marginBottom: 28,
+                  textAlign: "left",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}>
+                  {userProfile.mode === "planner" && (
+                    <p style={{ fontSize: 16, color: TEXT, lineHeight: 1.6, margin: 0 }}>
+                      You&apos;re set up as a <strong>planner</strong>. We&apos;ll build smart project plans — you execute with your own tools.
+                    </p>
+                  )}
+                  {userProfile.mode === "builder" && (
+                    <div>
+                      <p style={{ fontSize: 16, color: TEXT, lineHeight: 1.6, margin: 0 }}>
+                        We&apos;ll route tasks to{" "}
+                        <strong>{onboardingTools.map((t) => TOOL_CAPABILITIES[t].label).join(", ")}</strong>.
+                        You handle the human parts.
+                      </p>
+                      {onboardingTools.includes("claude-code") && (
+                        <div style={{ marginTop: 16, padding: "14px 16px", borderRadius: 10, background: SURFACE, border: `1px solid ${BORDER}` }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 2 }}>
+                                💡 Pro tip: Set up MCP in Claude Code
+                              </div>
+                              <div style={{ fontSize: 13, color: TEXT_LIGHT }}>
+                                Enable hands-free planning with MCP integration.
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => setUserProfile((prev) => ({ ...prev, setupMcp: !prev.setupMcp }))}
+                              style={{
+                                padding: "6px 14px",
+                                borderRadius: 8,
+                                border: `1px solid ${userProfile.setupMcp ? PRIMARY : BORDER}`,
+                                background: userProfile.setupMcp ? `${PRIMARY}12` : SURFACE,
+                                color: userProfile.setupMcp ? PRIMARY : TEXT_LIGHT,
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                fontFamily: "'DM Sans', sans-serif",
+                              }}
+                            >
+                              {userProfile.setupMcp ? "Hide setup" : "Show setup"}
+                            </button>
+                          </div>
+                          {userProfile.setupMcp && (
+                            <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 8, background: "#F7F6F3", fontSize: 13, color: TEXT, fontFamily: "'DM Mono', monospace", lineHeight: 1.6 }}>
+                              Add to your Claude Code MCP config:<br />
+                              <code style={{ fontSize: 12 }}>
+                                {`{ "mcpServers": { "letsbegin": { "url": "${typeof window !== "undefined" ? window.location.origin : ""}/api/mcp" } } }`}
+                              </code>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {userProfile.mode === "full" && (
+                    <p style={{ fontSize: 16, color: TEXT, lineHeight: 1.6, margin: 0 }}>
+                      We&apos;ll handle everything. You focus on the human tasks.
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => {
+                    setHasOnboarded(true);
+                    setStep("dashboard");
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "16px 24px",
+                    borderRadius: 12,
+                    border: "none",
+                    background: PRIMARY,
+                    color: "#fff",
+                    fontSize: 18,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  Let&apos;s begin →
+                </button>
+
+                <div style={{ textAlign: "center", marginTop: 16 }}>
+                  <button
+                    onClick={() => setOnboardingScreen(userProfile.mode === "builder" ? 2 : 1)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: TEXT_LIGHT,
+                      fontSize: 13,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                      textDecoration: "underline",
+                      textUnderlineOffset: 3,
+                    }}
+                  >
+                    ← Back
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
