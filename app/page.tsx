@@ -32,7 +32,7 @@ import { DagView } from "@/components/DagView";
 import { WelcomeBack } from "@/components/WelcomeBack";
 
 export default function Home() {
-  const { user, loading: authLoading, signInWithEmail, signUpWithEmail, signOut, configured: authConfigured } = useAuth();
+  const { user, loading: authLoading, signInWithEmail, signUpWithEmail, resetPassword, signOut, configured: authConfigured } = useAuth();
   const { savePlan, loadPlans, deletePlan } = usePlanStorage(user?.id);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
@@ -1101,6 +1101,31 @@ export default function Home() {
               >
                 {authMode === "signin" ? "Sign in" : "Create account"}
               </button>
+
+              {authMode === "signin" && (
+                <button
+                  onClick={async () => {
+                    if (!authEmail) { setAuthError("Enter your email first"); return; }
+                    setAuthError(""); setAuthSuccess("");
+                    const { error } = await resetPassword(authEmail);
+                    if (error) setAuthError(error.message);
+                    else setAuthSuccess("Password reset link sent! Check your email.");
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: TEXT_LIGHT,
+                    fontSize: 12,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                    marginBottom: 8,
+                    display: "block",
+                    margin: "0 auto 8px",
+                  }}
+                >
+                  Forgot your password?
+                </button>
+              )}
 
               <button
                 onClick={() => { setAuthMode(authMode === "signin" ? "signup" : "signin"); setAuthSuccess(""); setAuthError(""); }}
