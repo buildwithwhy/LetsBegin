@@ -10,7 +10,8 @@ import { SimpleMarkdown } from "@/components/SimpleMarkdown";
 const QUICK_PROMPTS = [
   "Walk me through this step by step",
   "What should I do first?",
-  "I'm stuck, help me break this down",
+  "What's the best approach for this?",
+  "I'm stuck, help me think through this",
 ];
 
 function buildSystemContext({
@@ -32,7 +33,7 @@ function buildSystemContext({
 
   // Core persona
   parts.push(
-    `You are helping a user complete a specific task in their project. They may have ADHD and find it helpful to have tasks broken down step-by-step. Be encouraging, specific, and action-oriented. Don't overwhelm with information — focus on what they need to do RIGHT NOW.`
+    `You are a helpful project assistant. The user is working on a specific task within a larger project. Help them think through the task, give advice, brainstorm approaches, or answer questions. Be concise and practical.`
   );
 
   parts.push(`\nHere's the full context:`);
@@ -95,7 +96,7 @@ function buildSystemContext({
   }
 
   parts.push(
-    `\nHelp them get through this task. If they're stuck, break it down further. If they need motivation, remind them why this matters and what it unblocks. Keep responses concise — use numbered steps when walking through a process.`
+    `\nBe conversational and helpful. Don't just suggest breaking down the task — engage with whatever the user is asking about. If they want to brainstorm, brainstorm. If they want strategy advice, give it. If they're stuck, help them get unstuck. Keep responses concise — use numbered steps when walking through a process.`
   );
 
   return parts.join("\n");
@@ -108,6 +109,7 @@ export function TaskChat({
   allTasks,
   doneIds,
   currentNodes,
+  byoKeys,
 }: {
   task: Task;
   projectSummary: string;
@@ -115,6 +117,7 @@ export function TaskChat({
   allTasks?: Task[];
   doneIds?: Set<string>;
   currentNodes?: DagNode[];
+  byoKeys?: { anthropic?: string; google?: string; openai?: string };
 }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
@@ -151,9 +154,14 @@ export function TaskChat({
     setMessages([...newMessages, assistantMsg]);
 
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (byoKeys?.anthropic) headers["x-user-anthropic-key"] = byoKeys.anthropic;
+      if (byoKeys?.google) headers["x-user-google-key"] = byoKeys.google;
+      if (byoKeys?.openai) headers["x-user-openai-key"] = byoKeys.openai;
+
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           systemContext,
           messages: newMessages,
@@ -206,18 +214,28 @@ export function TaskChat({
         data-task-chat={task.id}
         onClick={() => setOpen(true)}
         style={{
-          padding: "5px 12px",
-          border: `1px solid ${BORDER}`,
-          borderRadius: 6,
-          background: "transparent",
-          color: TEXT_LIGHT,
-          fontSize: 12,
+          padding: "8px 16px",
+          border: `1px solid ${PRIMARY}40`,
+          borderRadius: 8,
+          background: `${PRIMARY}08`,
+          color: PRIMARY,
+          fontSize: 13,
+          fontWeight: 500,
           cursor: "pointer",
           fontFamily: "'DM Sans', sans-serif",
-          marginTop: 4,
+          marginTop: 8,
+          transition: "background 0.15s, border-color 0.15s",
+        }}
+        onMouseEnter={(e) => {
+          (e.target as HTMLButtonElement).style.background = `${PRIMARY}14`;
+          (e.target as HTMLButtonElement).style.borderColor = PRIMARY;
+        }}
+        onMouseLeave={(e) => {
+          (e.target as HTMLButtonElement).style.background = `${PRIMARY}08`;
+          (e.target as HTMLButtonElement).style.borderColor = `${PRIMARY}40`;
         }}
       >
-        Help me with this
+        Chat about this task
       </button>
     );
   }
@@ -241,7 +259,7 @@ export function TaskChat({
           borderBottom: `1px solid ${BORDER}`,
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 600, color: PRIMARY }}>Task guide</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: PRIMARY }}>Chat about this task</span>
         <button
           onClick={() => setOpen(false)}
           style={{
@@ -259,7 +277,7 @@ export function TaskChat({
       </div>
       <div
         style={{
-          maxHeight: 260,
+          maxHeight: 400,
           overflow: "auto",
           padding: 12,
           display: "flex",
@@ -344,7 +362,7 @@ export function TaskChat({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
-          placeholder="How do I start this?"
+          placeholder="Ask anything about this task..."
           style={{
             flex: 1,
             padding: "6px 10px",

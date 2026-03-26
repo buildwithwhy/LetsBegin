@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, ENERGY_COLORS } from "@/lib/styles";
 import { ExecutionMode, PriorResult, TaskRouting, UserToolConfig, UserTool, TOOL_CAPABILITIES, routeTask } from "@/lib/styles";
 import { Task, Subtask, DagNode, Energy, Assignee, AgentType, ActivityEvent, TaskCategory } from "@/lib/dag";
@@ -117,6 +117,8 @@ export function TaskCard({
   onDecompose,
   doneIds,
   currentNodes,
+  onReopen,
+  byoKeys,
 }: {
   task: Task;
   result?: AgentResult;
@@ -135,6 +137,8 @@ export function TaskCard({
   onDecompose?: (taskId: string, granularity: "normal" | "detailed" | "tiny") => Promise<void>;
   doneIds?: Set<string>;
   currentNodes?: DagNode[];
+  onReopen?: (id: string) => void;
+  byoKeys?: { anthropic?: string; google?: string; openai?: string };
 }) {
   const isLocked = task.status === "locked";
   const isDone = task.status === "done";
@@ -151,6 +155,24 @@ export function TaskCard({
   const [decomposing, setDecomposing] = useState(false);
   const [toolOverride, setToolOverride] = useState<UserTool | null>(null);
   const [showToolPicker, setShowToolPicker] = useState(false);
+
+  // Reopen hover state
+  const [doneHovered, setDoneHovered] = useState(false);
+
+  // File attachments (local state only)
+  const [attachments, setAttachments] = useState<{ name: string; dataUrl: string }[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAttachments((prev) => [...prev, { name: file.name, dataUrl: reader.result as string }]);
+    };
+    reader.readAsDataURL(file);
+    // Reset so the same file can be selected again
+    e.target.value = "";
+  }, []);
 
   // ADHD Task Timer
   const [timerStartedAt, setTimerStartedAt] = useState<number | null>(null);
@@ -231,6 +253,8 @@ export function TaskCard({
     return (
       <div
         onClick={() => setDoneExpanded(true)}
+        onMouseEnter={() => setDoneHovered(true)}
+        onMouseLeave={() => setDoneHovered(false)}
         style={{
           background: SURFACE,
           borderRadius: 10,
@@ -258,7 +282,24 @@ export function TaskCard({
           {assigneeConfig.icon}
         </span>
         <span style={{ fontSize: 13, color: TEXT_LIGHT, textDecoration: "line-through" }}>{task.title}</span>
-        <span style={{ marginLeft: "auto", fontSize: 11, color: "#B0AFA8" }}>{"\u25B6"}</span>
+        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          {doneHovered && onReopen && (
+            <span
+              role="button"
+              onClick={(e) => { e.stopPropagation(); onReopen(task.id); }}
+              style={{
+                fontSize: 11,
+                color: TEXT_LIGHT,
+                cursor: "pointer",
+                textDecoration: "underline",
+                fontFamily: "'DM Sans', sans-serif",
+              }}
+            >
+              Reopen
+            </span>
+          )}
+          <span style={{ fontSize: 11, color: "#B0AFA8" }}>{"\u25B6"}</span>
+        </span>
       </div>
     );
   }
@@ -397,7 +438,26 @@ export function TaskCard({
           )}
         </div>
         {isLocked && <span style={{ fontSize: 14 }}>&#x1F512;</span>}
-        {isDone && <span onClick={() => setDoneExpanded(false)} style={{ fontSize: 14, color: "#2DA44E", cursor: "pointer" }}>{"\u2713 \u25BC"}</span>}
+        {isDone && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            {onReopen && (
+              <span
+                role="button"
+                onClick={(e) => { e.stopPropagation(); onReopen(task.id); }}
+                style={{
+                  fontSize: 11,
+                  color: TEXT_LIGHT,
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                Reopen
+              </span>
+            )}
+            <span onClick={() => setDoneExpanded(false)} style={{ fontSize: 14, color: "#2DA44E", cursor: "pointer" }}>{"\u2713 \u25BC"}</span>
+          </span>
+        )}
       </div>
       {isPending && onEditTask && editingTitle ? (
         <input
