@@ -21,7 +21,7 @@ import { usePlanStorage } from "@/hooks/usePlanStorage";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { templates, type ProjectTemplate } from "@/lib/templates";
 import {
-  PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, ENERGY_COLORS,
+  PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, FONT, MONO, ENERGY_COLORS,
   type ExecutionMode, type Step, type ClarifyQuestion, type PriorResult,
   type UserToolConfig, type UserTool, TOOL_CAPABILITIES, type UserProfile,
 } from "@/lib/styles";
@@ -141,6 +141,8 @@ export default function Home() {
   const [byoOpenedTool, setByoOpenedTool] = useState<string | null>(null);
   const [byoWaitingForResult, setByoWaitingForResult] = useState(false);
   const [showMcpSetup, setShowMcpSetup] = useState(false);
+  const [mcpCopiedStep, setMcpCopiedStep] = useState<string | null>(null);
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://your-project.supabase.co";
 
   // BYOK (Bring Your Own Key) state
   const [byoKeys, setByoKeys] = useState<{ anthropic?: string; google?: string; openai?: string }>(() => {
@@ -2521,11 +2523,61 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                             </button>
                           </div>
                           {userProfile.setupMcp && (
-                            <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 8, background: "#F7F6F3", fontSize: 13, color: TEXT, fontFamily: "'DM Mono', monospace", lineHeight: 1.6 }}>
-                              Add to your Claude Code MCP config:<br />
-                              <code style={{ fontSize: 12 }}>
-                                {`{ "mcpServers": { "letsbegin": { "url": "${typeof window !== "undefined" ? window.location.origin : ""}/api/mcp" } } }`}
-                              </code>
+                            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
+                              {/* Step 1 */}
+                              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                                <div style={{ minWidth: 28, height: 28, borderRadius: "50%", background: PRIMARY, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, marginTop: 2 }}>1</div>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 6 }}>One-time setup</div>
+                                  <div style={{ position: "relative" }}>
+                                    <div style={{ padding: "10px 12px", borderRadius: 8, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                      {`git clone https://github.com/nickarino/LetsBegin.git && cd LetsBegin/mcp-server && npm install`}
+                                    </div>
+                                    <button onClick={() => { navigator.clipboard.writeText("git clone https://github.com/nickarino/LetsBegin.git && cd LetsBegin/mcp-server && npm install"); setMcpCopiedStep("onb-1"); setTimeout(() => setMcpCopiedStep(null), 2000); }} style={{ position: "absolute", top: 6, right: 6, padding: "3px 8px", borderRadius: 4, border: "none", background: mcpCopiedStep === "onb-1" ? "#2DA44E" : "#333", color: "#fff", fontSize: 10, cursor: "pointer", fontFamily: FONT }}>
+                                      {mcpCopiedStep === "onb-1" ? "Copied!" : "Copy"}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                              {/* Step 2 */}
+                              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                                <div style={{ minWidth: 28, height: 28, borderRadius: "50%", background: PRIMARY, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, marginTop: 2 }}>2</div>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 4 }}>Add to <span style={{ fontFamily: MONO, fontSize: 12 }}>.claude/mcp.json</span></div>
+                                  <div style={{ fontSize: 11, color: TEXT_LIGHT, marginBottom: 6 }}>Service key: Supabase → Settings → API → service_role key</div>
+                                  <div style={{ position: "relative" }}>
+                                    <div style={{ padding: "10px 12px", borderRadius: 8, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+{`{
+  "mcpServers": {
+    "letsbegin": {
+      "command": "npx",
+      "args": ["tsx", "ACTUAL_PATH/mcp-server/src/index.ts"],
+      "env": {
+        "SUPABASE_URL": "${supabaseUrl}",  // pre-filled!
+        "SUPABASE_SERVICE_KEY": "YOUR_KEY"
+      }
+    }
+  }
+}`}
+                                    </div>
+                                    <button onClick={() => { navigator.clipboard.writeText(JSON.stringify({ mcpServers: { letsbegin: { command: "npx", args: ["tsx", "ACTUAL_PATH/mcp-server/src/index.ts"], env: { SUPABASE_URL: supabaseUrl, SUPABASE_SERVICE_KEY: "YOUR_KEY" } } } }, null, 2)); setMcpCopiedStep("onb-2"); setTimeout(() => setMcpCopiedStep(null), 2000); }} style={{ position: "absolute", top: 6, right: 6, padding: "3px 8px", borderRadius: 4, border: "none", background: mcpCopiedStep === "onb-2" ? "#2DA44E" : "#333", color: "#fff", fontSize: 10, cursor: "pointer", fontFamily: FONT }}>
+                                      {mcpCopiedStep === "onb-2" ? "Copied!" : "Copy config"}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                              {/* Step 3 */}
+                              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                                <div style={{ minWidth: 28, height: 28, borderRadius: "50%", background: PRIMARY, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, marginTop: 2 }}>3</div>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 6 }}>Restart Claude Code and say:</div>
+                                  <div style={{ position: "relative" }}>
+                                    <div style={{ padding: "10px 12px", borderRadius: 8, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.6 }}>
+                                      {`"Plan my project: [your brief]"`}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -3753,26 +3805,59 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                       {showMcpSetup ? "Hide setup" : "Set up MCP \u2192"}
                     </button>
                     {showMcpSetup && (
-                      <div style={{
-                        marginTop: 10, padding: 12, borderRadius: 8,
-                        background: "#1C1C1E", fontSize: 11,
-                        fontFamily: "'DM Mono', 'Fira Code', monospace",
-                        color: "#8FBC8F", lineHeight: 1.6,
-                        whiteSpace: "pre-wrap", wordBreak: "break-word",
-                      }}>
-{`// Add to .claude/mcp.json or claude_desktop_config.json
-{
+                      <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
+                        {/* Step 1 */}
+                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                          <div style={{ minWidth: 24, height: 24, borderRadius: "50%", background: "#1967D2", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, marginTop: 2 }}>1</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: TEXT, marginBottom: 4 }}>One-time setup</div>
+                            <div style={{ position: "relative" }}>
+                              <div style={{ padding: "8px 10px", borderRadius: 6, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                {`git clone https://github.com/nickarino/LetsBegin.git && cd LetsBegin/mcp-server && npm install`}
+                              </div>
+                              <button onClick={() => { navigator.clipboard.writeText("git clone https://github.com/nickarino/LetsBegin.git && cd LetsBegin/mcp-server && npm install"); setMcpCopiedStep("byo-1"); setTimeout(() => setMcpCopiedStep(null), 2000); }} style={{ position: "absolute", top: 4, right: 4, padding: "2px 7px", borderRadius: 4, border: "none", background: mcpCopiedStep === "byo-1" ? "#2DA44E" : "#333", color: "#fff", fontSize: 10, cursor: "pointer", fontFamily: FONT }}>
+                                {mcpCopiedStep === "byo-1" ? "Copied!" : "Copy"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        {/* Step 2 */}
+                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                          <div style={{ minWidth: 24, height: 24, borderRadius: "50%", background: "#1967D2", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, marginTop: 2 }}>2</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: TEXT, marginBottom: 3 }}>Add to <span style={{ fontFamily: MONO, fontSize: 11 }}>.claude/mcp.json</span></div>
+                            <div style={{ fontSize: 10, color: TEXT_LIGHT, marginBottom: 5 }}>Service key: Supabase &rarr; Settings &rarr; API &rarr; service_role key</div>
+                            <div style={{ position: "relative" }}>
+                              <div style={{ padding: "8px 10px", borderRadius: 6, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+{`{
   "mcpServers": {
     "letsbegin": {
       "command": "npx",
-      "args": ["tsx", "/path/to/LetsBegin/mcp-server/src/index.ts"],
+      "args": ["tsx", "ACTUAL_PATH/mcp-server/src/index.ts"],
       "env": {
-        "SUPABASE_URL": "https://your-project.supabase.co",
-        "SUPABASE_SERVICE_KEY": "your-service-role-key"
+        "SUPABASE_URL": "${supabaseUrl}",  // pre-filled!
+        "SUPABASE_SERVICE_KEY": "YOUR_KEY"
       }
     }
   }
 }`}
+                              </div>
+                              <button onClick={() => { navigator.clipboard.writeText(JSON.stringify({ mcpServers: { letsbegin: { command: "npx", args: ["tsx", "ACTUAL_PATH/mcp-server/src/index.ts"], env: { SUPABASE_URL: supabaseUrl, SUPABASE_SERVICE_KEY: "YOUR_KEY" } } } }, null, 2)); setMcpCopiedStep("byo-2"); setTimeout(() => setMcpCopiedStep(null), 2000); }} style={{ position: "absolute", top: 4, right: 4, padding: "2px 7px", borderRadius: 4, border: "none", background: mcpCopiedStep === "byo-2" ? "#2DA44E" : "#333", color: "#fff", fontSize: 10, cursor: "pointer", fontFamily: FONT }}>
+                                {mcpCopiedStep === "byo-2" ? "Copied!" : "Copy config"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        {/* Step 3 */}
+                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                          <div style={{ minWidth: 24, height: 24, borderRadius: "50%", background: "#1967D2", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, marginTop: 2 }}>3</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: TEXT, marginBottom: 4 }}>Restart Claude Code and say:</div>
+                            <div style={{ padding: "8px 10px", borderRadius: 6, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.5 }}>
+                              {`"Plan my project: ${brief.slice(0, 50)}${brief.length > 50 ? "..." : ""}"`}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
