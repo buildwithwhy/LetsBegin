@@ -1,6 +1,6 @@
 import { generateObject } from "ai";
 import { z } from "zod";
-import { selectModel } from "@/lib/models";
+import { selectModel, selectModelWithUserKey } from "@/lib/models";
 import type { ClarifyQuestion } from "@/lib/styles";
 
 export type { ClarifyQuestion };
@@ -21,8 +21,15 @@ const questionsSchema = z.object({
 export async function POST(req: Request) {
   const { brief } = await req.json();
 
-  // Gemini for fast/cheap question generation
-  const { model } = selectModel("clarify");
+  // Check for user-provided API keys
+  const userAnthropicKey = req.headers.get("x-user-anthropic-key");
+  const userGoogleKey = req.headers.get("x-user-google-key");
+  const userOpenaiKey = req.headers.get("x-user-openai-key");
+
+  // Use user key if provided, otherwise default model selection
+  const { model } = (userAnthropicKey || userGoogleKey || userOpenaiKey)
+    ? selectModelWithUserKey("clarify", { anthropic: userAnthropicKey, google: userGoogleKey, openai: userOpenaiKey })
+    : selectModel("clarify");
 
   try {
     const result = await generateObject({
