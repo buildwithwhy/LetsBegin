@@ -102,6 +102,16 @@ export default function Home() {
   const [focusCategory, setFocusCategory] = useState<TaskCategory | "all">("all");
   const [detourDismissed, setDetourDismissed] = useState(false);
 
+  // "Your Day" dashboard state
+  const [globalFocusMode, setGlobalFocusMode] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("letsbegin-focus-mode") === "true";
+    }
+    return false;
+  });
+  const [dayEnergy, setDayEnergy] = useState<Energy | null>(null);
+  const [dayWorkStyle, setDayWorkStyle] = useState<"deep" | "quick" | "smart" | null>(null);
+
   const { execute, results, running, runningCount } = useAgentExecutor();
 
   // Load saved plans for dashboard
@@ -129,6 +139,63 @@ export default function Home() {
       localStorage.setItem("letsbegin-execution-mode", executionMode);
     }
   }, [executionMode]);
+
+  // Persist globalFocusMode to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("letsbegin-focus-mode", String(globalFocusMode));
+    }
+  }, [globalFocusMode]);
+
+  // Compute cross-project recommended tasks for "Your Day"
+  const yourDayTasks = useMemo(() => {
+    if (savedPlans.length === 0) return [];
+
+    type ScoredTask = { task: Task; score: number; reasons: string[]; projectTitle: string; projectId: string };
+    const allScored: ScoredTask[] = [];
+
+    for (const sp of savedPlans) {
+      const allTasksForPlan = getAllTasks(sp.nodes);
+      const doneSet = new Set(sp.done_ids || []);
+      const unlockedNodes = computeUnlocked(sp.nodes, doneSet);
+      const pendingTasks = getAllTasks(unlockedNodes).filter((t) => t.status === "pending");
+      const scored = scoreTasks(pendingTasks, allTasksForPlan, dayEnergy, sp.priority || "medium");
+      for (const s of scored) {
+        allScored.push({ ...s, projectTitle: sp.project_title || "Untitled", projectId: sp.id });
+      }
+    }
+
+    // Apply work style re-sorting
+    allScored.sort((a, b) => {
+      let aBonus = 0;
+      let bBonus = 0;
+
+      if (dayWorkStyle === "deep") {
+        // Prefer high-energy tasks from high-priority projects
+        if (a.task.energy === "high") aBonus += 20;
+        if (b.task.energy === "high") bBonus += 20;
+        if (a.task.assignee === "user" || a.task.assignee === "hybrid") aBonus += 10;
+        if (b.task.assignee === "user" || b.task.assignee === "hybrid") bBonus += 10;
+      } else if (dayWorkStyle === "quick") {
+        // Prefer low-energy, small tasks, tasks with many subtasks done
+        if (a.task.energy === "low") aBonus += 20;
+        if (b.task.energy === "low") bBonus += 20;
+        if (a.task.energy === "medium") aBonus += 10;
+        if (b.task.energy === "medium") bBonus += 10;
+        if (a.task.subtasks && a.task.subtasks.length <= 2) aBonus += 10;
+        if (b.task.subtasks && b.task.subtasks.length <= 2) bBonus += 10;
+      }
+      // "smart" or null: use default scoring
+
+      // Energy filter: bump matching tasks
+      if (dayEnergy && a.task.energy === dayEnergy) aBonus += 15;
+      if (dayEnergy && b.task.energy === dayEnergy) bBonus += 15;
+
+      return (b.score + bBonus) - (a.score + aBonus);
+    });
+
+    return allScored.slice(0, 5);
+  }, [savedPlans, dayEnergy, dayWorkStyle]);
 
   const loadSavedPlan = useCallback((saved: typeof savedPlans[0]) => {
     setBrief(saved.brief);
@@ -734,6 +801,286 @@ export default function Home() {
         {/* ─── DASHBOARD ─── */}
         {(user || !authConfigured) && step === "dashboard" && (
           <div>
+            {/* ─── YOUR DAY ─── */}
+            {savedPlans.length > 0 && (
+              <div style={{ marginBottom: 32 }}>
+                {/* Focus mode toggle */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <h2 style={{ fontSize: 22, fontWeight: 700, color: TEXT, margin: 0 }}>Your Day</h2>
+                  <button
+                    onClick={() => setGlobalFocusMode(!globalFocusMode)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 14px",
+                      borderRadius: 20,
+                      border: `1px solid ${globalFocusMode ? PRIMARY : BORDER}`,
+                      background: globalFocusMode ? `${PRIMARY}12` : SURFACE,
+                      color: globalFocusMode ? PRIMARY : TEXT_LIGHT,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    <span style={{
+                      display: "inline-block",
+                      width: 32,
+                      height: 18,
+                      borderRadius: 9,
+                      background: globalFocusMode ? PRIMARY : BORDER,
+                      position: "relative",
+                      transition: "background 0.15s",
+                    }}>
+                      <span style={{
+                        display: "block",
+                        width: 14,
+                        height: 14,
+                        borderRadius: "50%",
+                        background: "#fff",
+                        position: "absolute",
+                        top: 2,
+                        left: globalFocusMode ? 16 : 2,
+                        transition: "left 0.15s",
+                        boxShadow: "0 1px 2px rgba(0,0,0,0.15)",
+                      }} />
+                    </span>
+                    Focus mode: show me one thing
+                  </button>
+                </div>
+
+                {/* Energy / work style chat picker */}
+                <div style={{
+                  padding: "16px 20px",
+                  borderRadius: 14,
+                  background: `linear-gradient(135deg, ${PRIMARY}06, ${PRIMARY}02)`,
+                  border: `1px solid ${BORDER}`,
+                  marginBottom: 16,
+                }}>
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 8 }}>
+                      How&apos;s your energy?
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {(["high", "medium", "low"] as Energy[]).map((level) => (
+                        <button
+                          key={level}
+                          onClick={() => setDayEnergy(dayEnergy === level ? null : level)}
+                          style={{
+                            padding: "7px 16px",
+                            borderRadius: 20,
+                            border: `1.5px solid ${dayEnergy === level ? ENERGY_COLORS[level] : BORDER}`,
+                            background: dayEnergy === level ? `${ENERGY_COLORS[level]}14` : SURFACE,
+                            color: dayEnergy === level ? ENERGY_COLORS[level] : TEXT,
+                            fontSize: 13,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif",
+                            transition: "all 0.15s",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <span style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: "50%",
+                            background: ENERGY_COLORS[level],
+                            display: "inline-block",
+                          }} />
+                          {level === "high" ? "High" : level === "medium" ? "Medium" : "Low"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 8 }}>
+                      What kind of work?
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {([
+                        { key: "deep" as const, label: "Deep focus", desc: "big, meaty tasks" },
+                        { key: "quick" as const, label: "Quick wins", desc: "small, easy tasks" },
+                        { key: "smart" as const, label: "Whatever's next", desc: "smart scheduling" },
+                      ]).map((ws) => (
+                        <button
+                          key={ws.key}
+                          onClick={() => setDayWorkStyle(dayWorkStyle === ws.key ? null : ws.key)}
+                          style={{
+                            padding: "7px 16px",
+                            borderRadius: 20,
+                            border: `1.5px solid ${dayWorkStyle === ws.key ? PRIMARY : BORDER}`,
+                            background: dayWorkStyle === ws.key ? `${PRIMARY}12` : SURFACE,
+                            color: dayWorkStyle === ws.key ? PRIMARY : TEXT,
+                            fontSize: 13,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            fontFamily: "'DM Sans', sans-serif",
+                            transition: "all 0.15s",
+                          }}
+                        >
+                          {ws.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Recommended tasks */}
+                {yourDayTasks.length > 0 ? (
+                  globalFocusMode ? (
+                    /* Focus mode: single big card */
+                    <div
+                      onClick={() => {
+                        const sp = savedPlans.find((p) => p.id === yourDayTasks[0].projectId);
+                        if (sp) loadSavedPlan(sp);
+                      }}
+                      style={{
+                        padding: "28px 24px",
+                        borderRadius: 14,
+                        background: SURFACE,
+                        border: `2px solid ${PRIMARY}40`,
+                        cursor: "pointer",
+                        textAlign: "center",
+                        transition: "border-color 0.15s",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.borderColor = PRIMARY)}
+                      onMouseLeave={(e) => (e.currentTarget.style.borderColor = `${PRIMARY}40`)}
+                    >
+                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: PRIMARY, marginBottom: 8 }}>
+                        This is your next step
+                      </div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 8 }}>
+                        {yourDayTasks[0].task.title}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 12, color: TEXT_LIGHT }}>{yourDayTasks[0].projectTitle}</span>
+                        <span style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: ENERGY_COLORS[yourDayTasks[0].task.energy],
+                          background: `${ENERGY_COLORS[yourDayTasks[0].task.energy]}14`,
+                          padding: "2px 8px",
+                          borderRadius: 10,
+                        }}>
+                          <span style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: ENERGY_COLORS[yourDayTasks[0].task.energy],
+                          }} />
+                          {yourDayTasks[0].task.energy}
+                        </span>
+                        {yourDayTasks[0].task.deadline && (
+                          <span style={{ fontSize: 11, color: TEXT_LIGHT }}>
+                            Due {new Date(yourDayTasks[0].task.deadline).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                      {yourDayTasks[0].reasons.length > 0 && (
+                        <div style={{ fontSize: 11, color: TEXT_LIGHT, marginTop: 8 }}>
+                          {yourDayTasks[0].reasons[0]}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Normal mode: list of top tasks */
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {yourDayTasks.map((item, idx) => {
+                        const sp = savedPlans.find((p) => p.id === item.projectId);
+                        return (
+                          <div
+                            key={item.task.id + item.projectId}
+                            onClick={() => sp && loadSavedPlan(sp)}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 14,
+                              padding: "12px 16px",
+                              borderRadius: 10,
+                              background: SURFACE,
+                              border: `1px solid ${BORDER}`,
+                              cursor: "pointer",
+                              transition: "border-color 0.15s",
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.borderColor = PRIMARY)}
+                            onMouseLeave={(e) => (e.currentTarget.style.borderColor = BORDER)}
+                          >
+                            {/* Rank number */}
+                            <div style={{
+                              width: 24,
+                              height: 24,
+                              borderRadius: "50%",
+                              background: idx === 0 ? PRIMARY : `${PRIMARY}18`,
+                              color: idx === 0 ? "#fff" : PRIMARY,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 12,
+                              fontWeight: 700,
+                              flexShrink: 0,
+                            }}>
+                              {idx + 1}
+                            </div>
+
+                            {/* Energy dot */}
+                            <span style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: "50%",
+                              background: ENERGY_COLORS[item.task.energy],
+                              flexShrink: 0,
+                            }} />
+
+                            {/* Task info */}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {item.task.title}
+                              </div>
+                              <div style={{ fontSize: 11, color: TEXT_LIGHT, marginTop: 1 }}>
+                                {item.projectTitle}
+                                {item.reasons.length > 0 && ` \u00B7 ${item.reasons[0]}`}
+                              </div>
+                            </div>
+
+                            {/* Right side badges */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                              {item.task.deadline && (
+                                <span style={{ fontSize: 10, color: TEXT_LIGHT, background: `${BORDER}80`, padding: "2px 6px", borderRadius: 6 }}>
+                                  {new Date(item.task.deadline).toLocaleDateString()}
+                                </span>
+                              )}
+                              <span style={{
+                                fontSize: 10,
+                                fontWeight: 600,
+                                color: ENERGY_COLORS[item.task.energy],
+                                background: `${ENERGY_COLORS[item.task.energy]}14`,
+                                padding: "2px 7px",
+                                borderRadius: 8,
+                              }}>
+                                {item.task.energy}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
+                ) : (
+                  <div style={{ padding: 16, textAlign: "center", color: TEXT_LIGHT, fontSize: 13 }}>
+                    All caught up! No pending tasks across your projects.
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
               <h1 style={{ fontSize: 28, fontWeight: 700, color: TEXT, margin: 0 }}>
                 Your projects
@@ -1186,6 +1533,16 @@ export default function Home() {
         {/* ─── INPUT ─── */}
         {(user || !authConfigured || authLoading) && step === "input" && (
           <div>
+            <div style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+              <span
+                style={{ cursor: "pointer", transition: "color 0.15s ease" }}
+                onClick={goToDashboard}
+                onMouseEnter={(e) => (e.currentTarget.style.color = PRIMARY)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = TEXT_LIGHT)}
+              >Projects</span>
+              <span style={{ color: BORDER }}>&gt;</span>
+              <span>New project</span>
+            </div>
             <h1 style={{ fontSize: 36, fontWeight: 700, marginBottom: 8, color: TEXT }}>
               What are we building?
             </h1>
@@ -1600,6 +1957,16 @@ export default function Home() {
         {/* ─── CLARIFY ─── */}
         {step === "clarify" && (
           <div>
+            <div style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+              <span
+                style={{ cursor: "pointer", transition: "color 0.15s ease" }}
+                onClick={goToDashboard}
+                onMouseEnter={(e) => (e.currentTarget.style.color = PRIMARY)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = TEXT_LIGHT)}
+              >Projects</span>
+              <span style={{ color: BORDER }}>&gt;</span>
+              <span>New project</span>
+            </div>
             {clarifyLoading ? (
               <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 40 }}>
                 <div
@@ -1907,6 +2274,16 @@ export default function Home() {
         {/* ─── COMPILING ─── */}
         {step === "compiling" && (
           <div>
+            <div style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+              <span
+                style={{ cursor: "pointer", transition: "color 0.15s ease" }}
+                onClick={goToDashboard}
+                onMouseEnter={(e) => (e.currentTarget.style.color = PRIMARY)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = TEXT_LIGHT)}
+              >Projects</span>
+              <span style={{ color: BORDER }}>&gt;</span>
+              <span>New project</span>
+            </div>
             {compileStatus.startsWith("error:") ? (
               <div>
                 <div style={{
@@ -2038,6 +2415,16 @@ export default function Home() {
 
           return (
           <div>
+            <div style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+              <span
+                style={{ cursor: "pointer", transition: "color 0.15s ease" }}
+                onClick={goToDashboard}
+                onMouseEnter={(e) => (e.currentTarget.style.color = PRIMARY)}
+                onMouseLeave={(e) => (e.currentTarget.style.color = TEXT_LIGHT)}
+              >Projects</span>
+              <span style={{ color: BORDER }}>&gt;</span>
+              <span>{plan.project_title}</span>
+            </div>
             {/* Welcome back recap */}
             {welcomeBackData && showWelcomeBack && (
               <WelcomeBack

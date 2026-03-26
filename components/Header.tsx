@@ -39,6 +39,29 @@ export function Header({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        {onDashboard && (
+          <button
+            onClick={onDashboard}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              background: "none",
+              border: "none",
+              color: TEXT_LIGHT,
+              fontSize: 13,
+              cursor: "pointer",
+              padding: "4px 8px",
+              borderRadius: 6,
+              fontFamily: "'DM Sans', sans-serif",
+              transition: "color 0.15s ease",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = PRIMARY)}
+            onMouseLeave={(e) => (e.currentTarget.style.color = TEXT_LIGHT)}
+          >
+            ← Projects
+          </button>
+        )}
         <span
           style={{ fontSize: 22, fontWeight: 700, color: PRIMARY, cursor: onDashboard ? "pointer" : "default" }}
           onClick={onDashboard}
