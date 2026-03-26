@@ -100,10 +100,14 @@ server.tool(
       .enum(["high", "medium", "low"])
       .optional()
       .describe("Energy level required (default: medium)"),
+    deadline: z
+      .string()
+      .optional()
+      .describe("Optional deadline as ISO date string (e.g., '2026-03-28T23:59:59.000Z')"),
   },
-  async ({ project_id, title, description, assignee, energy }) => {
+  async ({ project_id, title, description, assignee, energy, deadline }) => {
     try {
-      const result = await addTask(project_id, title, description, assignee, energy);
+      const result = await addTask(project_id, title, description, assignee, energy, deadline);
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

@@ -77,6 +77,7 @@ export function DagView({
   executionMode = "api",
   userTools,
   onEditTask,
+  onDecompose,
   doneIds,
   currentNodes,
 }: {
@@ -94,6 +95,7 @@ export function DagView({
   executionMode?: ExecutionMode;
   userTools?: UserToolConfig;
   onEditTask?: (id: string, updates: { title?: string; description?: string; assignee?: Assignee; agent_type?: AgentType }) => void;
+  onDecompose?: (taskId: string, granularity: "normal" | "detailed" | "tiny") => Promise<void>;
   doneIds?: Set<string>;
   currentNodes?: DagNode[];
 }) {
@@ -196,6 +198,7 @@ export function DagView({
                 executionMode={executionMode}
                 userTools={userTools}
                 onEditTask={onEditTask}
+                onDecompose={onDecompose}
                 doneIds={doneIds}
                 currentNodes={currentNodes}
               />
@@ -238,6 +241,7 @@ export function DagView({
                     allTasksList={allTasks}
                     executionMode={executionMode}
                     userTools={userTools}
+                    onDecompose={onDecompose}
                     doneIds={doneIds}
                     currentNodes={currentNodes}
                   />

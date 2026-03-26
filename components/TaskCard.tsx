@@ -13,6 +13,28 @@ import { formatDuration } from "@/lib/utils";
 
 // ─── Helpers ───
 
+// Format deadline as relative time and determine color
+function getDeadlineInfo(deadline: string): { label: string; color: string } {
+  const now = Date.now();
+  const deadlineMs = new Date(deadline).getTime();
+  const hoursUntil = (deadlineMs - now) / (1000 * 60 * 60);
+
+  if (hoursUntil < 0) {
+    return { label: "OVERDUE", color: "#D1242F" };
+  }
+  if (hoursUntil < 24) {
+    const h = Math.max(1, Math.round(hoursUntil));
+    return { label: `Due in ${h}h`, color: "#D1242F" };
+  }
+  if (hoursUntil < 48) {
+    return { label: "Due tomorrow", color: "#CF6E00" };
+  }
+  // Show date for further deadlines
+  const d = new Date(deadline);
+  const label = `Due ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+  return { label, color: "#787774" };
+}
+
 // Map a task to the routing task type based on its properties
 function inferTaskType(task: Task): "coding" | "writing" | "research" | "planning" | "review" {
   if (task.agent_type === "claude-code") return "coding";
@@ -75,6 +97,7 @@ export function TaskCard({
   executionMode = "api",
   userTools,
   onEditTask,
+  onDecompose,
   doneIds,
   currentNodes,
 }: {
@@ -91,7 +114,8 @@ export function TaskCard({
   allTasksList?: Task[];
   executionMode?: ExecutionMode;
   userTools?: UserToolConfig;
-  onEditTask?: (id: string, updates: { title?: string; description?: string; assignee?: Assignee; agent_type?: AgentType }) => void;
+  onEditTask?: (id: string, updates: { title?: string; description?: string; assignee?: Assignee; agent_type?: AgentType; deadline?: string }) => void;
+  onDecompose?: (taskId: string, granularity: "normal" | "detailed" | "tiny") => Promise<void>;
   doneIds?: Set<string>;
   currentNodes?: DagNode[];
 }) {
@@ -105,6 +129,24 @@ export function TaskCard({
   const [editingDesc, setEditingDesc] = useState(false);
   const [editTitle, setEditTitle] = useState(task.title);
   const [editDesc, setEditDesc] = useState(task.description);
+  const [editingDeadline, setEditingDeadline] = useState(false);
+  const [showDecompose, setShowDecompose] = useState(false);
+  const [decomposing, setDecomposing] = useState(false);
+
+  const canDecompose = isPending && !isLocked && onDecompose &&
+    (task.assignee === "user" || task.assignee === "hybrid") &&
+    (!task.subtasks || task.subtasks.length <= 2);
+
+  const handleDecompose = async (granularity: "normal" | "detailed" | "tiny") => {
+    if (!onDecompose) return;
+    setDecomposing(true);
+    try {
+      await onDecompose(task.id, granularity);
+    } finally {
+      setDecomposing(false);
+      setShowDecompose(false);
+    }
+  };
 
   // Compute per-task routing from user's tool config
   const taskRouting = userTools && userTools.available.length > 0
@@ -222,6 +264,51 @@ export function TaskCard({
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: ENERGY_COLORS[task.energy] }} />
             {task.energy}
           </span>
+          {task.deadline && !editingDeadline && (() => {
+            const info = getDeadlineInfo(task.deadline);
+            return (
+              <span
+                onClick={() => { if (isPending && onEditTask) setEditingDeadline(true); }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 3,
+                  padding: "2px 7px",
+                  borderRadius: 5,
+                  background: `${info.color}14`,
+                  color: info.color,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  cursor: isPending && onEditTask ? "pointer" : "default",
+                }}
+              >
+                {info.label}
+              </span>
+            );
+          })()}
+          {editingDeadline && isPending && onEditTask && (
+            <input
+              type="date"
+              defaultValue={task.deadline ? task.deadline.split("T")[0] : ""}
+              autoFocus
+              onBlur={(e) => {
+                setEditingDeadline(false);
+                const val = e.target.value;
+                if (val) {
+                  onEditTask(task.id, { deadline: new Date(val + "T23:59:59").toISOString() });
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                if (e.key === "Escape") setEditingDeadline(false);
+              }}
+              style={{
+                fontSize: 10, padding: "2px 4px", borderRadius: 4,
+                border: `1px solid ${PRIMARY}`, outline: "none",
+                fontFamily: "'DM Sans', sans-serif",
+              }}
+            />
+          )}
         </div>
         {isLocked && <span style={{ fontSize: 14 }}>&#x1F512;</span>}
         {isDone && <span onClick={() => setDoneExpanded(false)} style={{ fontSize: 14, color: "#2DA44E", cursor: "pointer" }}>{"\u2713 \u25BC"}</span>}
@@ -282,6 +369,72 @@ export function TaskCard({
           onClick={() => { if (isPending && onEditTask) { setEditDesc(task.description); setEditingDesc(true); } }}
         >
           {task.description}
+        </div>
+      )}
+
+      {/* Break this down button */}
+      {canDecompose && !decomposing && (
+        <div style={{ marginBottom: 8 }}>
+          {!showDecompose ? (
+            <button
+              onClick={() => setShowDecompose(true)}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                fontSize: 12,
+                color: TEXT_LIGHT,
+                cursor: "pointer",
+                fontFamily: "'DM Sans', sans-serif",
+              }}
+            >
+              Break this down
+            </button>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, color: TEXT_LIGHT }}>How small?</span>
+              {(["normal", "detailed", "tiny"] as const).map((g) => (
+                <button
+                  key={g}
+                  onClick={() => handleDecompose(g)}
+                  style={{
+                    padding: "3px 10px",
+                    borderRadius: 6,
+                    border: g === "tiny" ? `1.5px solid ${PRIMARY}` : `1px solid ${BORDER}`,
+                    background: g === "tiny" ? `${PRIMARY}10` : "transparent",
+                    color: g === "tiny" ? PRIMARY : TEXT_LIGHT,
+                    fontSize: 11,
+                    fontWeight: g === "tiny" ? 600 : 400,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  {g === "normal" ? "Normal" : g === "detailed" ? "Detailed" : "Tiny steps"}
+                </button>
+              ))}
+              <button
+                onClick={() => setShowDecompose(false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: "2px 4px",
+                  fontSize: 11,
+                  color: TEXT_LIGHT,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                  opacity: 0.6,
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {decomposing && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: TEXT_LIGHT, marginBottom: 8 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: TEXT_LIGHT, animation: "pulse 1.5s ease-in-out infinite" }} />
+          Breaking it down...
         </div>
       )}
 

@@ -30,6 +30,7 @@ export interface Task {
   has_wait_after?: boolean;
   wait_type?: "response" | "build" | "approval" | "processing" | "shipping" | "other";
   estimated_wait?: "minutes" | "hours" | "days" | "weeks";
+  deadline?: string;
   notes?: string;
   started_at?: string;
   completed_at?: string;

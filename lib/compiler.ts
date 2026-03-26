@@ -17,6 +17,7 @@ const taskSchema = z.object({
   has_wait_after: z.boolean().optional(),
   wait_type: z.enum(["response", "build", "approval", "processing", "shipping", "other"]).optional(),
   estimated_wait: z.enum(["minutes", "hours", "days", "weeks"]).optional(),
+  deadline: z.string().optional(),
 });
 
 const parallelGroupSchema = z.object({
@@ -175,6 +176,9 @@ Examples:
 
 This helps the system suggest: "Do this first — you'll be waiting on a response, so start other tasks while you wait."
 Leave these fields unset for tasks with no meaningful wait time after completion.
+
+DEADLINES:
+If the user mentions any deadlines, due dates, or time constraints, tag tasks with a \`deadline\` ISO date string. Infer deadlines from context (e.g., 'need this by Friday' means next Friday's date, 'due in 3 days' means 3 days from today). Today's date is ${new Date().toISOString().split("T")[0]}. Only set deadline on tasks that actually have time constraints — don't add deadlines to every task.
 
 Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the dependency graph is valid — no circular dependencies, and every id referenced in depends_on must exist.`,
   });

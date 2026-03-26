@@ -52,6 +52,7 @@ export interface Task {
   wait_type?: "response" | "build" | "approval" | "processing" | "shipping" | "other";
   estimated_wait?: "minutes" | "hours" | "days" | "weeks";
   // Traceability
+  deadline?: string;  // ISO date string for task deadline
   activity?: ActivityEvent[];  // traceable log of what happened
   notes?: string;  // human-written notes on this task
   started_at?: string;  // when this task was first acted on
@@ -196,7 +197,38 @@ export function scoreTasks(
       reasons.push("Start agent draft, then you review");
     }
 
-    // 4. Energy matching (smaller bonus, tiebreaker)
+    // 4. Deadline urgency
+    if (task.deadline) {
+      const now = Date.now();
+      const deadlineMs = new Date(task.deadline).getTime();
+      const hoursUntil = (deadlineMs - now) / (1000 * 60 * 60);
+
+      if (hoursUntil < 0) {
+        score += 60;
+        reasons.push("OVERDUE");
+      } else if (hoursUntil < 24) {
+        score += 40;
+        reasons.push(`Due in ${Math.max(1, Math.round(hoursUntil))} hours`);
+      } else if (hoursUntil < 48) {
+        score += 25;
+        reasons.push("Due tomorrow");
+      } else if (hoursUntil < 7 * 24) {
+        score += 10;
+        reasons.push("Due this week");
+      }
+
+      // Factor in estimated_wait — if wait time eats into deadline, it's urgent NOW
+      if (task.estimated_wait && hoursUntil > 0) {
+        const waitHoursMap: Record<string, number> = { minutes: 0.5, hours: 4, days: 72, weeks: 168 };
+        const waitHours = waitHoursMap[task.estimated_wait] || 0;
+        if (waitHours > 0 && hoursUntil - waitHours < 24) {
+          score += 30;
+          reasons.push("Start now \u2014 wait time + deadline");
+        }
+      }
+    }
+
+    // 5. Energy matching (smaller bonus, tiebreaker)
     if (currentEnergy && task.energy === currentEnergy) {
       score += 5;
       reasons.push("Matches your energy level");

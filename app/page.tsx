@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   type Plan,
   type DagNode,
@@ -27,6 +27,7 @@ import { Header } from "@/components/Header";
 import { ThinkingTerminal } from "@/components/ThinkingTerminal";
 import { TaskCard } from "@/components/TaskCard";
 import { DagView } from "@/components/DagView";
+import { WelcomeBack } from "@/components/WelcomeBack";
 
 export default function Home() {
   const { user, loading: authLoading, signInWithEmail, signUpWithEmail, signOut, configured: authConfigured } = useAuth();
@@ -90,6 +91,9 @@ export default function Home() {
   const [newTaskDesc, setNewTaskDesc] = useState("");
   const [newTaskAssignee, setNewTaskAssignee] = useState<Assignee>("user");
   const [newTaskEnergy, setNewTaskEnergy] = useState<Energy>("medium");
+  const [newTaskDeadline, setNewTaskDeadline] = useState("");
+  const [lastVisitAt, setLastVisitAt] = useState<number | null>(null);
+  const [showWelcomeBack, setShowWelcomeBack] = useState(false);
 
   const { execute, results, running, runningCount } = useAgentExecutor();
 
@@ -129,6 +133,20 @@ export default function Home() {
     setDoneIds(new Set(saved.done_ids));
     setDoneSubtaskIds(new Set(saved.done_subtask_ids));
     setSavedPlanId(saved.id);
+    // Read last visit timestamp for welcome-back recap
+    const visitKey = `letsbegin-last-visit-${saved.id}`;
+    const storedVisit = localStorage.getItem(visitKey);
+    if (storedVisit) {
+      const ts = parseInt(storedVisit, 10);
+      const minutesAway = (Date.now() - ts) / 60000;
+      setLastVisitAt(ts);
+      setShowWelcomeBack(minutesAway >= 30);
+    } else {
+      setLastVisitAt(null);
+      setShowWelcomeBack(false);
+    }
+    // Update last visit timestamp to now
+    localStorage.setItem(visitKey, String(Date.now()));
     setStep("reveal");
   }, []);
 
@@ -170,6 +188,45 @@ export default function Home() {
   const doneCount = allTasks.filter((t) => doneIds.has(t.id)).length;
 
   const currentNodes = plan ? computeUnlocked(plan.nodes, doneIds) : [];
+
+  // Welcome-back recap data
+  const welcomeBackData = useMemo(() => {
+    if (!showWelcomeBack || !lastVisitAt || !plan) return null;
+    const minutesAway = (Date.now() - lastVisitAt) / 60000;
+    if (minutesAway < 30) return null;
+    const tasks = getAllTasks(plan.nodes);
+    const completedTasks = tasks.filter((t) => doneIds.has(t.id)).length;
+    // Find tasks completed since last visit
+    const completedSinceVisit = tasks.filter(
+      (t) => t.completed_at && new Date(t.completed_at).getTime() > lastVisitAt
+    );
+    const lastCompleted = completedSinceVisit.sort(
+      (a, b) => new Date(b.completed_at!).getTime() - new Date(a.completed_at!).getTime()
+    )[0];
+    // Agent tasks that completed while away
+    const agentCompletedTitles = completedSinceVisit
+      .filter((t) => t.assignee === "agent")
+      .map((t) => t.title);
+    // Next task from scoring
+    const unlocked = computeUnlocked(plan.nodes, doneIds);
+    const pendingTasks = getAllTasks(unlocked).filter((t) => t.status === "pending");
+    const pendingHuman = pendingTasks.filter((t) => t.assignee === "user" || t.assignee === "hybrid");
+    const scored = scoreTasks(
+      pendingHuman.length > 0 ? pendingHuman : pendingTasks,
+      tasks,
+      currentEnergy,
+    );
+    const topPriority = scored[0];
+    return {
+      minutesAway,
+      totalTasks: tasks.length,
+      completedTasks,
+      lastCompletedTitle: lastCompleted?.title,
+      nextTaskTitle: topPriority?.task.title,
+      nextTaskReason: topPriority?.reasons[0],
+      agentCompletedTitles,
+    };
+  }, [showWelcomeBack, lastVisitAt, plan, doneIds, currentEnergy]);
 
   // Encouragement messages for completing tasks
   const encouragements = [
@@ -262,7 +319,7 @@ export default function Home() {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
   }, []);
 
-  const addNewTask = useCallback((title: string, description: string, assignee: Assignee, energy: Energy) => {
+  const addNewTask = useCallback((title: string, description: string, assignee: Assignee, energy: Energy, deadline?: string) => {
     setPlan((prev) => {
       if (!prev) return prev;
       const newTask: Task = {
@@ -275,12 +332,13 @@ export default function Home() {
         status: "pending",
         depends_on: [],
         agent_type: assignee === "agent" ? "builtin" : undefined,
+        deadline: deadline || undefined,
       };
       return { ...prev, nodes: [...prev.nodes, newTask] };
     });
   }, []);
 
-  const editTask = useCallback((taskId: string, updates: { title?: string; description?: string; assignee?: Assignee; agent_type?: AgentType }) => {
+  const editTask = useCallback((taskId: string, updates: { title?: string; description?: string; assignee?: Assignee; agent_type?: AgentType; deadline?: string }) => {
     setPlan((prev) => {
       if (!prev) return prev;
       const updateTask = (t: Task): Task => {
@@ -364,6 +422,15 @@ export default function Home() {
     return () => clearTimeout(timeout);
   }, [plan, doneIds, doneSubtaskIds, user, brief, savePlan, savedPlanId]);
 
+  // Save last visit timestamp for new plans once savedPlanId is assigned
+  useEffect(() => {
+    if (!savedPlanId || step !== "reveal") return;
+    const visitKey = `letsbegin-last-visit-${savedPlanId}`;
+    if (!localStorage.getItem(visitKey)) {
+      localStorage.setItem(visitKey, String(Date.now()));
+    }
+  }, [savedPlanId, step]);
+
   // Auto-run agent tasks when they become unblocked (API mode only)
   const currentTasksForAutoRun = getAllTasks(currentNodes);
   useEffect(() => {
@@ -406,6 +473,50 @@ export default function Home() {
     });
     execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee, force, task.agent_type);
   };
+
+  const handleDecompose = useCallback(async (taskId: string, granularity: "normal" | "detailed" | "tiny") => {
+    const task = allTasks.find((t) => t.id === taskId);
+    if (!task || !plan) return;
+
+    const res = await fetch("/api/decompose", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        taskTitle: task.title,
+        taskDescription: task.description,
+        projectContext: plan.summary || brief,
+        currentSubtasks: task.subtasks,
+        granularity,
+      }),
+    });
+
+    if (!res.ok) return;
+
+    const data = await res.json();
+    if (!data.subtasks) return;
+
+    // Convert API response subtasks to the Subtask format used in the plan
+    const newSubtasks = data.subtasks.map((st: { id: string; title: string; assignee: "user" | "agent"; description?: string }) => ({
+      id: st.id,
+      title: st.description ? `${st.title} — ${st.description}` : st.title,
+      assignee: st.assignee,
+      depends_on: [] as string[],
+    }));
+
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const updateTask = (t: Task): Task => {
+        if (t.id !== taskId) return t;
+        return { ...t, subtasks: newSubtasks };
+      };
+      return {
+        ...prev,
+        nodes: prev.nodes.map((n): DagNode =>
+          n.type === "task" ? updateTask(n) : { ...n, children: n.children.map(updateTask) }
+        ),
+      };
+    });
+  }, [allTasks, plan, brief]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1645,6 +1756,24 @@ export default function Home() {
 
           return (
           <div>
+            {/* Welcome back recap */}
+            {welcomeBackData && showWelcomeBack && (
+              <WelcomeBack
+                minutesAway={welcomeBackData.minutesAway}
+                totalTasks={welcomeBackData.totalTasks}
+                completedTasks={welcomeBackData.completedTasks}
+                lastCompletedTitle={welcomeBackData.lastCompletedTitle}
+                nextTaskTitle={welcomeBackData.nextTaskTitle}
+                nextTaskReason={welcomeBackData.nextTaskReason}
+                agentCompletedTitles={welcomeBackData.agentCompletedTitles}
+                onDismiss={() => {
+                  setShowWelcomeBack(false);
+                  if (savedPlanId) {
+                    localStorage.setItem(`letsbegin-last-visit-${savedPlanId}`, String(Date.now()));
+                  }
+                }}
+              />
+            )}
             {/* Mode toggle */}
             <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
               <button
@@ -1900,6 +2029,7 @@ export default function Home() {
                       executionMode={executionMode}
                       userTools={userTools}
                       onEditTask={editTask}
+                      onDecompose={handleDecompose}
                       doneIds={doneIds}
                       currentNodes={currentNodes}
                     />
@@ -2306,12 +2436,21 @@ export default function Home() {
                         <option value="medium">Medium effort</option>
                         <option value="high">High effort</option>
                       </select>
+                      <input
+                        type="date"
+                        value={newTaskDeadline}
+                        onChange={(e) => setNewTaskDeadline(e.target.value)}
+                        style={{ padding: "4px 8px", fontSize: 12, borderRadius: 6, border: `1px solid ${BORDER}`, fontFamily: "'DM Sans', sans-serif" }}
+                        title="Deadline (optional)"
+                      />
                       <button
                         onClick={() => {
                           if (!newTaskTitle.trim()) return;
-                          addNewTask(newTaskTitle.trim(), newTaskDesc.trim(), newTaskAssignee, newTaskEnergy);
+                          const dl = newTaskDeadline ? new Date(newTaskDeadline + "T23:59:59").toISOString() : undefined;
+                          addNewTask(newTaskTitle.trim(), newTaskDesc.trim(), newTaskAssignee, newTaskEnergy, dl);
                           setNewTaskTitle("");
                           setNewTaskDesc("");
+                          setNewTaskDeadline("");
                           setShowAddTask(false);
                         }}
                         disabled={!newTaskTitle.trim()}
@@ -2355,6 +2494,7 @@ export default function Home() {
                   executionMode={executionMode}
                   userTools={userTools}
                   onEditTask={editTask}
+                  onDecompose={handleDecompose}
                   doneIds={doneIds}
                   currentNodes={currentNodes}
                 />

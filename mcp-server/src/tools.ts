@@ -116,6 +116,37 @@ function scoreTasks(
         reasons.push("Start agent draft, then you review");
       }
 
+      // Deadline urgency
+      if (task.deadline) {
+        const now = Date.now();
+        const deadlineMs = new Date(task.deadline).getTime();
+        const hoursUntil = (deadlineMs - now) / (1000 * 60 * 60);
+
+        if (hoursUntil < 0) {
+          score += 60;
+          reasons.push("OVERDUE");
+        } else if (hoursUntil < 24) {
+          score += 40;
+          reasons.push(`Due in ${Math.max(1, Math.round(hoursUntil))} hours`);
+        } else if (hoursUntil < 48) {
+          score += 25;
+          reasons.push("Due tomorrow");
+        } else if (hoursUntil < 7 * 24) {
+          score += 10;
+          reasons.push("Due this week");
+        }
+
+        // Factor in estimated_wait
+        if (task.estimated_wait && hoursUntil > 0) {
+          const waitHoursMap: Record<string, number> = { minutes: 0.5, hours: 4, days: 72, weeks: 168 };
+          const waitHours = waitHoursMap[task.estimated_wait] || 0;
+          if (waitHours > 0 && hoursUntil - waitHours < 24) {
+            score += 30;
+            reasons.push("Start now -- wait time + deadline");
+          }
+        }
+      }
+
       if (currentEnergy && task.energy === currentEnergy) {
         score += 5;
         reasons.push("Matches your energy level");
@@ -184,6 +215,7 @@ export async function getCurrentTask(projectId?: string) {
       assignee: priority.task.assignee,
       energy: priority.task.energy,
       subtasks: priority.task.subtasks,
+      deadline: priority.task.deadline,
     },
     why: priority.reasons,
   };
@@ -268,7 +300,8 @@ export async function addTask(
   title: string,
   description: string,
   assignee: "agent" | "user" | "hybrid" = "user",
-  energy: "high" | "medium" | "low" = "medium"
+  energy: "high" | "medium" | "low" = "medium",
+  deadline?: string
 ) {
   const plan = await getPlanById(projectId);
   if (!plan) throw new Error(`Project not found: ${projectId}`);
@@ -282,6 +315,7 @@ export async function addTask(
     energy,
     status: "pending",
     depends_on: [],
+    deadline,
   };
 
   const updatedNodes = [...plan.nodes, newTask];
