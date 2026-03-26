@@ -140,6 +140,32 @@ Rules:
 - energy is "high" (significant effort), "medium" (moderate effort), or "low" (quick task)
 - Do NOT include subtasks — keep this lean
 
+IMPORTANT — HYBRID BY DEFAULT:
+In 2025+, users work WITH their AI tools on almost everything. If a task involves
+writing, thinking, research, analysis, or drafting — make it "hybrid" (AI drafts,
+human reviews/customizes). Reserve "user" ONLY for tasks that genuinely require
+human-only action: physical tasks, account logins, social interactions, payments,
+or decisions that need human judgment with no AI input helpful.
+
+Examples:
+- "Define target personas" → HYBRID (AI can draft personas, human refines)
+- "Write messaging playbook" → HYBRID (AI drafts, human reviews)
+- "Join communities & post" → USER (requires human account/presence)
+- "Research competitor pricing" → AGENT (fully automatable)
+- "Draft Reddit posts" → HYBRID (AI drafts, human approves before posting)
+
+Only assign "user" when the task is:
+- Purely physical (errands, shipping, in-person meetings, phone calls)
+- Requires real-world credentials the AI cannot have (logging into a specific account, making a payment)
+- Social/relationship tasks (networking, meeting someone in person, joining a community)
+
+SOCIAL MEDIA POSTING GUIDANCE:
+If a task involves both drafting AND posting on social media (Reddit, Facebook, Twitter, LinkedIn, etc.),
+split the concern: make the task "hybrid" with agent_type set, where the AI drafts the content and the
+description explicitly notes that the human handles the actual posting/publishing. If the task is ONLY
+about the act of posting (not drafting), make it "user". Never make social media posting fully "agent" —
+a human must always control what gets published under their name.
+
 AGENT TYPE ASSIGNMENT:
 For tasks with assignee "agent" or "hybrid", set agent_type:
 - "claude-code": Tasks that need real coding, implementation, debugging, complex reasoning, or working with code repositories. Claude Code can read files, write code, run commands, and think deeply.
