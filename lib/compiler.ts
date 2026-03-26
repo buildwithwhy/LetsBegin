@@ -1,7 +1,9 @@
 import { streamText, generateObject } from "ai";
 import { z } from "zod";
 import { type Plan, type DagNode, getAllTasks, computeUnlocked } from "./dag";
-import { selectModel } from "./models";
+import { selectModel, selectModelWithUserKey } from "./models";
+
+export type UserKeys = { anthropic?: string | null; google?: string | null; openai?: string | null };
 
 // Schema WITHOUT subtasks — fast to generate
 const taskSchema = z.object({
@@ -66,7 +68,8 @@ type ImageInput = { mediaType: string; data: string };
 
 export async function* streamThinking(
   brief: string,
-  images: ImageInput[] = []
+  images: ImageInput[] = [],
+  userKeys?: UserKeys,
 ): AsyncGenerator<CompilerEvent> {
   const imageContent = images.map((img) => ({
     type: "image" as const,
@@ -89,8 +92,12 @@ Think out loud about this brief. Make 4-6 short observations about:
 
 Keep each observation to 1-2 sentences. Be practical and specific.`;
 
+  // Helper to select model, using user keys if provided
+  const pickModel = (purpose: import("./models").ModelPurpose) =>
+    userKeys ? selectModelWithUserKey(purpose, userKeys) : selectModel(purpose);
+
   // Phase 1: Think out loud — Claude for strong reasoning
-  const { model: thinkingModel } = selectModel("thinking");
+  const { model: thinkingModel } = pickModel("thinking");
   const thinkingResult = streamText({
     model: thinkingModel,
     messages: [
@@ -111,7 +118,7 @@ Keep each observation to 1-2 sentences. Be practical and specific.`;
   // Phase 2: Generate plan structure (no subtasks — fast) — Claude for reasoning
   yield { type: "status", text: "Structuring your plan..." };
 
-  const { model: planModel } = selectModel("planning");
+  const { model: planModel } = pickModel("planning");
   const planResult = await generateObject({
     model: planModel,
     schema: planSchema,
@@ -206,7 +213,7 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
         .map((t) => `- id: "${t.id}", title: "${t.title}", assignee: "${t.assignee}", description: "${t.description}"`)
         .join("\n");
 
-      const { model: subtaskModel } = selectModel("subtasks");
+      const { model: subtaskModel } = pickModel("subtasks");
       const subtasksResult = await generateObject({
         model: subtaskModel,
         schema: subtasksSchema,

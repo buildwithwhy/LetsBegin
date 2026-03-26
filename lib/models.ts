@@ -1,5 +1,5 @@
-import { google } from "@ai-sdk/google";
-import { anthropic } from "@ai-sdk/anthropic";
+import { google, createGoogleGenerativeAI } from "@ai-sdk/google";
+import { anthropic, createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 
 // ── Model routing ──
@@ -110,6 +110,39 @@ export function selectModel(purpose: ModelPurpose): ModelSelection {
     case "subtasks":
       return { model: google(GEMINI_FLASH), label: "gemini-flash" };
   }
+}
+
+// Select model using a user-provided API key (BYOK)
+export function selectModelWithUserKey(
+  purpose: ModelPurpose,
+  keys: { anthropic?: string | null; google?: string | null; openai?: string | null },
+): ModelSelection {
+  // Determine which provider this purpose needs
+  const needsClaude = ["planning", "thinking", "execute-code", "chat"].includes(purpose);
+  const needsGoogle = ["clarify", "execute-write", "subtasks"].includes(purpose);
+
+  // Try the purpose-appropriate provider first with user key
+  if (needsClaude && keys.anthropic) {
+    const userAnthropic = createAnthropic({ apiKey: keys.anthropic });
+    return { model: userAnthropic(CLAUDE_SONNET), label: "claude-sonnet" };
+  }
+  if (needsGoogle && keys.google) {
+    const userGoogle = createGoogleGenerativeAI({ apiKey: keys.google });
+    return { model: userGoogle(GEMINI_FLASH), label: "gemini-flash" };
+  }
+
+  // Cross-provider fallback: if user has a key but for the "wrong" provider, use it anyway
+  if (keys.anthropic) {
+    const userAnthropic = createAnthropic({ apiKey: keys.anthropic });
+    return { model: userAnthropic(CLAUDE_SONNET), label: "claude-sonnet" };
+  }
+  if (keys.google) {
+    const userGoogle = createGoogleGenerativeAI({ apiKey: keys.google });
+    return { model: userGoogle(GEMINI_FLASH), label: "gemini-flash" };
+  }
+
+  // No user keys matched — fall back to default selection
+  return selectModel(purpose);
 }
 
 // Select model with explicit OpenRouter preference (for budget mode)

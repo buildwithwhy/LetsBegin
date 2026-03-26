@@ -110,6 +110,25 @@ export default function Home() {
   const [byoClarifyActive, setByoClarifyActive] = useState(false);
   const [byoPlanActive, setByoPlanActive] = useState(false);
   const [byoCopied, setByoCopied] = useState(false);
+  const [byoOpenedTool, setByoOpenedTool] = useState<string | null>(null);
+  const [byoWaitingForResult, setByoWaitingForResult] = useState(false);
+  const [showMcpSetup, setShowMcpSetup] = useState(false);
+
+  // BYOK (Bring Your Own Key) state
+  const [byoKeys, setByoKeys] = useState<{ anthropic?: string; google?: string; openai?: string }>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("letsbegin-byo-keys");
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    return {};
+  });
+  const [showByokSection, setShowByokSection] = useState(false);
+  const [showByokPasswords, setShowByokPasswords] = useState<{ anthropic?: boolean; google?: boolean; openai?: boolean }>({});
+  const [byokKeysDraft, setByokKeysDraft] = useState<{ anthropic?: string; google?: string; openai?: string }>({});
+  const [byokSaved, setByokSaved] = useState(false);
+  const [byokDirectLoading, setByokDirectLoading] = useState(false);
 
   // "Your Day" dashboard state
   const [globalFocusMode, setGlobalFocusMode] = useState<boolean>(() => {
@@ -626,12 +645,108 @@ export default function Home() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  // Tool URL map for "Open in [Tool]" buttons
+  const TOOL_URLS: Partial<Record<UserTool, string>> = {
+    "claude-cowork": "https://claude.ai/new",
+    "claude-max": "https://claude.ai/new",
+    "chatgpt-plus": "https://chatgpt.com",
+    "gemini-pro": "https://gemini.google.com/app",
+  };
+
+  const getPreferredByoTool = (): { tool: UserTool; cap: typeof TOOL_CAPABILITIES[UserTool]; url: string | null } | null => {
+    // Prefer the user's preferred tool, then first non-API non-claude-code tool
+    const candidates = userTools.preferred
+      ? [userTools.preferred, ...userTools.available.filter(t => t !== userTools.preferred)]
+      : userTools.available;
+    for (const t of candidates) {
+      if (!TOOL_CAPABILITIES[t].isApi && t !== "claude-code") {
+        return { tool: t, cap: TOOL_CAPABILITIES[t], url: TOOL_URLS[t] || null };
+      }
+    }
+    // If no web tool, return first available for label purposes
+    if (candidates.length > 0) {
+      const t = candidates[0];
+      return { tool: t, cap: TOOL_CAPABILITIES[t], url: TOOL_URLS[t] || null };
+    }
+    return null;
+  };
+
+  const handleOpenInTool = (prompt: string) => {
+    const info = getPreferredByoTool();
+    navigator.clipboard.writeText(prompt).then(() => {
+      setByoCopied(true);
+      if (info?.url) {
+        setByoOpenedTool(info.cap.label);
+        window.open(info.url, "_blank");
+        setByoWaitingForResult(true);
+        setTimeout(() => {
+          setByoCopied(false);
+          setByoOpenedTool(null);
+        }, 3000);
+      } else {
+        setTimeout(() => setByoCopied(false), 2000);
+      }
+    });
+  };
+
+  // Check if user has a relevant BYOK key for direct API calls
+  const getRelevantByoKey = (): { provider: string; key: string; header: string } | null => {
+    if (byoKeys.anthropic) return { provider: "Anthropic", key: byoKeys.anthropic, header: "x-user-anthropic-key" };
+    if (byoKeys.google) return { provider: "Google AI", key: byoKeys.google, header: "x-user-google-key" };
+    if (byoKeys.openai) return { provider: "OpenAI", key: byoKeys.openai, header: "x-user-openai-key" };
+    return null;
+  };
+
   const handleClarify = async () => {
     setClarifyError("");
     setQuestionIndex(0);
     setStep("clarify");
     setByoJsonInput("");
     setByoJsonError("");
+
+    // BYO mode with BYOK key: call API directly with user's key
+    const byokKey = getRelevantByoKey();
+    if (executionMode === "byo" && userTools.available.length > 0 && byokKey) {
+      setByoClarifyActive(false);
+      setByokDirectLoading(true);
+      setClarifyLoading(true);
+      try {
+        const res = await fetch("/api/clarify", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            [byokKey.header]: byokKey.key,
+          },
+          body: JSON.stringify({ brief }),
+        });
+        const text = await res.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          setClarifyError(`Server returned non-JSON (HTTP ${res.status}): ${text.slice(0, 300)}`);
+          setQuestions([]);
+          return;
+        }
+        if (!res.ok || data.error) {
+          setClarifyError(data.error || `HTTP ${res.status}`);
+          setQuestions([]);
+          return;
+        }
+        const qs = data.questions || [];
+        setQuestions(qs);
+        const initialAnswers: Record<string, string> = {};
+        qs.forEach((q: ClarifyQuestion) => { initialAnswers[q.id] = ""; });
+        setAnswers(initialAnswers);
+      } catch (err) {
+        setClarifyError(String(err));
+        setQuestions([]);
+      } finally {
+        setClarifyLoading(false);
+        setByokDirectLoading(false);
+      }
+      return;
+    }
 
     // BYO mode: show prompt for user to copy to their AI
     if (executionMode === "byo" && userTools.available.length > 0) {
@@ -648,6 +763,8 @@ Return as JSON: { "questions": [{ "id": "...", "question": "...", "type": "...",
       setByoClarifyActive(true);
       setClarifyLoading(false);
       setQuestions([]);
+      setByoWaitingForResult(false);
+      setByoOpenedTool(null);
       return;
     }
 
@@ -948,6 +1065,106 @@ Return as JSON: { "questions": [{ "id": "...", "question": "...", "type": "...",
     setByoJsonError("");
 
     const enrichedBrief = buildEnrichedBrief();
+
+    // BYO mode with BYOK key: call API directly with user's key
+    const byokKey = getRelevantByoKey();
+    if (executionMode === "byo" && userTools.available.length > 0 && byokKey) {
+      setByoPlanActive(false);
+      setByokDirectLoading(true);
+      setCompileStartTime(Date.now());
+
+      try {
+        const res = await fetch("/api/compile", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            [byokKey.header]: byokKey.key,
+          },
+          body: JSON.stringify({ brief: enrichedBrief, attachments }),
+        });
+
+        const reader = res.body?.getReader();
+        if (!reader) {
+          setCompileError("Failed to connect to the server. Please try again.");
+          setCompileStartTime(null);
+          setStep("input");
+          setByokDirectLoading(false);
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              try {
+                const event = JSON.parse(line);
+                if (event.type === "thought") {
+                  setThinkingText((prev) => prev + event.text);
+                } else if (event.type === "status") {
+                  setCompileStatus(event.text);
+                } else if (event.type === "plan") {
+                  setCompileStartTime(null);
+                  const receivedPlan = justMeMode ? convertToJustMe(event.plan) : event.plan;
+                  setPlan(receivedPlan);
+                  setStep("reveal");
+                } else if (event.type === "subtasks") {
+                  setPlan((prev) => {
+                    if (!prev) return prev;
+                    const subtaskMap = new Map<string, unknown[]>();
+                    for (const t of event.tasks) {
+                      subtaskMap.set(t.id, t.subtasks);
+                    }
+                    const updatedNodes = prev.nodes.map((node: DagNode) => {
+                      if (node.type === "task" && subtaskMap.has(node.id)) {
+                        return { ...node, subtasks: subtaskMap.get(node.id) };
+                      }
+                      if (node.type === "parallel_group") {
+                        return {
+                          ...node,
+                          children: node.children.map((child: Task) =>
+                            subtaskMap.has(child.id)
+                              ? { ...child, subtasks: subtaskMap.get(child.id) }
+                              : child
+                          ),
+                        };
+                      }
+                      return node;
+                    });
+                    return { ...prev, nodes: updatedNodes as DagNode[] };
+                  });
+                } else if (event.type === "error") {
+                  setCompileStatus("error:" + (event.text || "Unknown error"));
+                  setCompileStartTime(null);
+                }
+              } catch {
+                // skip malformed lines
+              }
+            }
+          }
+        } catch {
+          setCompileError("Connection lost while building your plan. Please try again.");
+          setCompileStartTime(null);
+          setStep("input");
+        }
+      } catch (err) {
+        setCompileError("Failed to build plan: " + String(err));
+        setCompileStartTime(null);
+        setStep("input");
+      } finally {
+        setByokDirectLoading(false);
+      }
+      return;
+    }
 
     // BYO mode: show prompt for user to copy to their AI
     if (executionMode === "byo" && userTools.available.length > 0) {
@@ -2279,6 +2496,104 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
               </div>
             )}
 
+            {/* BYOK (Bring Your Own Key) section */}
+            {!justMeMode && (userTools.available.some(t => TOOL_CAPABILITIES[t].isApi) || userTools.available.length > 0) && (
+              <div style={{ marginTop: 10 }}>
+                <button
+                  onClick={() => setShowByokSection((v) => !v)}
+                  style={{
+                    background: "none", border: "none", padding: 0,
+                    fontSize: 12, color: TEXT_LIGHT, cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                    display: "flex", alignItems: "center", gap: 4,
+                    textDecoration: "underline", textDecorationStyle: "dotted" as const,
+                  }}
+                >
+                  {showByokSection ? "\u25BE" : "\u25B8"} Add your API keys for seamless planning (optional)
+                </button>
+                {showByokSection && (
+                  <div style={{
+                    marginTop: 8, padding: "14px 16px", borderRadius: 10,
+                    border: `1px solid ${BORDER}`, background: SURFACE,
+                  }}>
+                    <div style={{ fontSize: 11, color: TEXT_LIGHT, marginBottom: 10, lineHeight: 1.4 }}>
+                      Keys are stored locally in your browser, never sent to our servers except to make AI calls on your behalf.
+                    </div>
+                    {([
+                      { key: "anthropic" as const, label: "Anthropic API Key", placeholder: "sk-ant-..." },
+                      { key: "google" as const, label: "Google AI API Key", placeholder: "AIza..." },
+                      { key: "openai" as const, label: "OpenAI API Key", placeholder: "sk-..." },
+                    ] as const).map(({ key, label, placeholder }) => (
+                      <div key={key} style={{ marginBottom: 8 }}>
+                        <label style={{ fontSize: 12, fontWeight: 500, color: TEXT, display: "block", marginBottom: 3 }}>
+                          {label}
+                        </label>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <input
+                            type={showByokPasswords[key] ? "text" : "password"}
+                            value={byokKeysDraft[key] ?? byoKeys[key] ?? ""}
+                            onChange={(e) => {
+                              setByokKeysDraft((prev) => ({ ...prev, [key]: e.target.value }));
+                              setByokSaved(false);
+                            }}
+                            placeholder={placeholder}
+                            style={{
+                              flex: 1, padding: "7px 10px", fontSize: 12,
+                              fontFamily: "'DM Mono', monospace", borderRadius: 7,
+                              border: `1.5px solid ${BORDER}`, background: "#FAFAF9",
+                              outline: "none", boxSizing: "border-box",
+                            }}
+                          />
+                          <button
+                            onClick={() => setShowByokPasswords((prev) => ({ ...prev, [key]: !prev[key] }))}
+                            style={{
+                              background: "none", border: `1px solid ${BORDER}`, borderRadius: 6,
+                              padding: "5px 8px", fontSize: 11, cursor: "pointer",
+                              color: TEXT_LIGHT, fontFamily: "'DM Sans', sans-serif",
+                            }}
+                          >
+                            {showByokPasswords[key] ? "Hide" : "Show"}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => {
+                        const merged = {
+                          anthropic: byokKeysDraft.anthropic ?? byoKeys.anthropic,
+                          google: byokKeysDraft.google ?? byoKeys.google,
+                          openai: byokKeysDraft.openai ?? byoKeys.openai,
+                        };
+                        // Remove empty keys
+                        const cleaned: { anthropic?: string; google?: string; openai?: string } = {};
+                        if (merged.anthropic?.trim()) cleaned.anthropic = merged.anthropic.trim();
+                        if (merged.google?.trim()) cleaned.google = merged.google.trim();
+                        if (merged.openai?.trim()) cleaned.openai = merged.openai.trim();
+                        setByoKeys(cleaned);
+                        localStorage.setItem("letsbegin-byo-keys", JSON.stringify(cleaned));
+                        setByokSaved(true);
+                        setTimeout(() => setByokSaved(false), 2000);
+                      }}
+                      style={{
+                        padding: "7px 18px", border: "none", borderRadius: 8,
+                        background: byokSaved ? "#2DA44E" : PRIMARY,
+                        color: "#fff", fontSize: 12, fontWeight: 600,
+                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                        marginTop: 4, transition: "background 0.2s",
+                      }}
+                    >
+                      {byokSaved ? "\u2713 Keys saved" : "Save keys"}
+                    </button>
+                    {Object.keys(byoKeys).length > 0 && !byokSaved && (
+                      <span style={{ fontSize: 11, color: "#2DA44E", marginLeft: 8, fontWeight: 500 }}>
+                        {Object.keys(byoKeys).length} key{Object.keys(byoKeys).length !== 1 ? "s" : ""} stored
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             <button
               onClick={handleClarify}
               disabled={brief.trim().length < 10 || clarifyLoading}
@@ -2395,23 +2710,69 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                 >
                   {byoClarifyPrompt}
                 </div>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(byoClarifyPrompt).then(() => {
-                      setByoCopied(true);
-                      setTimeout(() => setByoCopied(false), 2000);
-                    });
-                  }}
-                  style={{
-                    padding: "7px 16px", border: "none", borderRadius: 8,
-                    background: byoCopied ? "#2DA44E" : PRIMARY,
-                    color: "#fff", fontSize: 13, fontWeight: 600,
-                    cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                    marginBottom: 14, transition: "background 0.2s",
-                  }}
-                >
-                  {byoCopied ? "\u2713 Copied!" : "Copy prompt"}
-                </button>
+
+                {/* Open in Tool + Copy buttons */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center", flexWrap: "wrap" }}>
+                  {(() => {
+                    const info = getPreferredByoTool();
+                    if (info?.url) {
+                      return (
+                        <button
+                          onClick={() => handleOpenInTool(byoClarifyPrompt)}
+                          style={{
+                            padding: "8px 18px", border: "none", borderRadius: 8,
+                            background: byoOpenedTool ? "#2DA44E" : PRIMARY,
+                            color: "#fff", fontSize: 13, fontWeight: 600,
+                            cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                            transition: "background 0.2s",
+                            display: "inline-flex", alignItems: "center", gap: 6,
+                          }}
+                        >
+                          {byoOpenedTool
+                            ? `Prompt copied! Opening ${byoOpenedTool}...`
+                            : `Open in ${info.cap.label} \u2192`}
+                        </button>
+                      );
+                    }
+                    return null;
+                  })()}
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(byoClarifyPrompt).then(() => {
+                        setByoCopied(true);
+                        setTimeout(() => setByoCopied(false), 2000);
+                      });
+                    }}
+                    style={{
+                      padding: "6px 14px", border: `1px solid ${BORDER}`, borderRadius: 8,
+                      background: byoCopied ? "#2DA44E" : "transparent",
+                      color: byoCopied ? "#fff" : TEXT_LIGHT, fontSize: 12, fontWeight: 500,
+                      cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    {byoCopied ? "\u2713 Copied!" : "Copy prompt"}
+                  </button>
+                </div>
+
+                {/* Waiting for result indicator */}
+                {byoWaitingForResult && !byoJsonInput.trim() && (
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "8px 12px", borderRadius: 8,
+                    background: `${PRIMARY}08`, border: `1px solid ${PRIMARY}20`,
+                    marginBottom: 10, fontSize: 12, color: PRIMARY, fontWeight: 500,
+                  }}>
+                    <div style={{
+                      width: 12, height: 12,
+                      border: `2px solid ${PRIMARY}`,
+                      borderTopColor: "transparent",
+                      borderRadius: "50%",
+                      animation: "spin 0.8s linear infinite",
+                    }} />
+                    Waiting for your result...
+                  </div>
+                )}
 
                 {/* Paste area */}
                 <div style={{ marginTop: 4 }}>
@@ -2500,7 +2861,20 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                     animation: "spin 0.8s linear infinite",
                   }}
                 />
-                <span style={{ fontSize: 14, color: "#787774" }}>Generating questions...</span>
+                <span style={{ fontSize: 14, color: "#787774" }}>
+                  {byokDirectLoading ? "Planning with your API key..." : "Generating questions..."}
+                </span>
+                {byokDirectLoading && (() => {
+                  const k = getRelevantByoKey();
+                  return k ? (
+                    <span style={{
+                      fontSize: 11, color: "#1967D2", background: "#E8F0FE",
+                      padding: "2px 8px", borderRadius: 4, fontWeight: 500, marginLeft: 4,
+                    }}>
+                      Using your {k.provider} key
+                    </span>
+                  ) : null;
+                })()}
                 <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
               </div>
             ) : questions.length > 0 ? (
@@ -2866,6 +3240,56 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                   This saves API costs by using your own AI
                 </div>
 
+                {/* MCP callout for Claude Code users */}
+                {userTools.available.includes("claude-code") && (
+                  <div style={{
+                    padding: "12px 16px", borderRadius: 10,
+                    background: "#E8F0FE", border: "1px solid #1967D240",
+                    marginBottom: 14,
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1967D2", marginBottom: 4 }}>
+                      Using Claude Code? Skip all this.
+                    </div>
+                    <div style={{ fontSize: 12, color: "#37352F", lineHeight: 1.5, marginBottom: 6 }}>
+                      Set up the LetsBegin MCP server and just say: <span style={{ fontFamily: "'DM Mono', monospace", background: "#fff", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>&quot;Plan my project: {brief.slice(0, 60)}{brief.length > 60 ? "..." : ""}&quot;</span><br />
+                      Claude Code will generate and submit the plan automatically.
+                    </div>
+                    <button
+                      onClick={() => setShowMcpSetup((v) => !v)}
+                      style={{
+                        padding: "4px 12px", border: "none", borderRadius: 6,
+                        background: "#1967D2", color: "#fff", fontSize: 12, fontWeight: 600,
+                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      {showMcpSetup ? "Hide setup" : "Set up MCP \u2192"}
+                    </button>
+                    {showMcpSetup && (
+                      <div style={{
+                        marginTop: 10, padding: 12, borderRadius: 8,
+                        background: "#1C1C1E", fontSize: 11,
+                        fontFamily: "'DM Mono', 'Fira Code', monospace",
+                        color: "#8FBC8F", lineHeight: 1.6,
+                        whiteSpace: "pre-wrap", wordBreak: "break-word",
+                      }}>
+{`// Add to .claude/mcp.json or claude_desktop_config.json
+{
+  "mcpServers": {
+    "letsbegin": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/LetsBegin/mcp-server/src/index.ts"],
+      "env": {
+        "SUPABASE_URL": "https://your-project.supabase.co",
+        "SUPABASE_SERVICE_KEY": "your-service-role-key"
+      }
+    }
+  }
+}`}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Copyable prompt block */}
                 <div
                   onClick={() => {
@@ -2888,23 +3312,69 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                 >
                   {byoPlanPrompt}
                 </div>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(byoPlanPrompt).then(() => {
-                      setByoCopied(true);
-                      setTimeout(() => setByoCopied(false), 2000);
-                    });
-                  }}
-                  style={{
-                    padding: "7px 16px", border: "none", borderRadius: 8,
-                    background: byoCopied ? "#2DA44E" : PRIMARY,
-                    color: "#fff", fontSize: 13, fontWeight: 600,
-                    cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                    marginBottom: 16, transition: "background 0.2s",
-                  }}
-                >
-                  {byoCopied ? "\u2713 Copied!" : "Copy prompt"}
-                </button>
+
+                {/* Open in Tool + Copy buttons */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
+                  {(() => {
+                    const info = getPreferredByoTool();
+                    if (info?.url) {
+                      return (
+                        <button
+                          onClick={() => handleOpenInTool(byoPlanPrompt)}
+                          style={{
+                            padding: "8px 18px", border: "none", borderRadius: 8,
+                            background: byoOpenedTool ? "#2DA44E" : PRIMARY,
+                            color: "#fff", fontSize: 13, fontWeight: 600,
+                            cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                            transition: "background 0.2s",
+                            display: "inline-flex", alignItems: "center", gap: 6,
+                          }}
+                        >
+                          {byoOpenedTool
+                            ? `Prompt copied! Opening ${byoOpenedTool}...`
+                            : `Open in ${info.cap.label} \u2192`}
+                        </button>
+                      );
+                    }
+                    return null;
+                  })()}
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(byoPlanPrompt).then(() => {
+                        setByoCopied(true);
+                        setTimeout(() => setByoCopied(false), 2000);
+                      });
+                    }}
+                    style={{
+                      padding: "6px 14px", border: `1px solid ${BORDER}`, borderRadius: 8,
+                      background: byoCopied ? "#2DA44E" : "transparent",
+                      color: byoCopied ? "#fff" : TEXT_LIGHT, fontSize: 12, fontWeight: 500,
+                      cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    {byoCopied ? "\u2713 Copied!" : "Copy prompt"}
+                  </button>
+                </div>
+
+                {/* Waiting for result indicator */}
+                {byoWaitingForResult && !byoJsonInput.trim() && (
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "8px 12px", borderRadius: 8,
+                    background: `${PRIMARY}08`, border: `1px solid ${PRIMARY}20`,
+                    marginBottom: 10, fontSize: 12, color: PRIMARY, fontWeight: 500,
+                  }}>
+                    <div style={{
+                      width: 12, height: 12,
+                      border: `2px solid ${PRIMARY}`,
+                      borderTopColor: "transparent",
+                      borderRadius: "50%",
+                      animation: "spin 0.8s linear infinite",
+                    }} />
+                    Waiting for your result...
+                  </div>
+                )}
 
                 {/* Paste area — prominently styled */}
                 <div style={{
@@ -3043,6 +3513,17 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                       }}
                     />
                     <span style={{ fontSize: 16, fontWeight: 600 }}>{compileStatus}</span>
+                    {byokDirectLoading && (() => {
+                      const k = getRelevantByoKey();
+                      return k ? (
+                        <span style={{
+                          fontSize: 11, color: "#1967D2", background: "#E8F0FE",
+                          padding: "2px 8px", borderRadius: 4, fontWeight: 500, marginLeft: 8,
+                        }}>
+                          Using your {k.provider} key
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
                   <span style={{ fontSize: 13, color: TEXT_LIGHT, fontVariantNumeric: "tabular-nums" }}>
                     {elapsed}s
