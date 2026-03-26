@@ -950,88 +950,170 @@ export default function Home() {
           </div>
         )}
 
-        {/* ─── AUTH ─── */}
+        {/* ─── LANDING + AUTH ─── */}
         {authConfigured && !authLoading && !user && (
-          <div style={{ maxWidth: 380, margin: "60px auto", textAlign: "center" }}>
-            <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Welcome to LetsBegin</h2>
-            <p style={{ color: "#787774", fontSize: 14, marginBottom: 24 }}>Sign in to save your plans and progress.</p>
+          <div>
+            {/* Hero */}
+            <div style={{ textAlign: "center", marginBottom: 40, paddingTop: 20 }}>
+              <h1 style={{ fontSize: 40, fontWeight: 800, color: TEXT, margin: "0 0 12px 0", lineHeight: 1.15 }}>
+                Describe it. Plan it.<br />Get it done.
+              </h1>
+              <p style={{ fontSize: 17, color: TEXT_LIGHT, lineHeight: 1.6, maxWidth: 520, margin: "0 auto 24px" }}>
+                LetsBegin turns any goal into a smart project plan. AI handles what it can.
+                You handle what matters. Bring your own tools &mdash; no extra API costs.
+              </p>
+            </div>
 
-            <input
-              type="email"
-              placeholder="Email"
-              value={authEmail}
-              onChange={(e) => setAuthEmail(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                fontSize: 14,
-                fontFamily: "'DM Sans', sans-serif",
-                borderRadius: 8,
-                border: `1px solid ${BORDER}`,
-                outline: "none",
-                boxSizing: "border-box",
-                marginBottom: 8,
-              }}
-            />
-            <input
-              type="password"
-              placeholder="Password"
-              value={authPassword}
-              onChange={(e) => setAuthPassword(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                fontSize: 14,
-                fontFamily: "'DM Sans', sans-serif",
-                borderRadius: 8,
-                border: `1px solid ${BORDER}`,
-                outline: "none",
-                boxSizing: "border-box",
-                marginBottom: 12,
-              }}
-            />
+            {/* Feature grid */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: 14,
+              marginBottom: 40,
+            }}>
+              {[
+                { icon: "\uD83D\uDCAC", title: "Plain language in", desc: "Describe what you want to accomplish. We\u2019ll ask smart follow-up questions, then build a dependency graph of tasks." },
+                { icon: "\uD83E\uDDE0", title: "Bring your own AI", desc: "Have Claude Code, ChatGPT, or Gemini? Use them. We route each task to the best tool you already pay for." },
+                { icon: "\uD83C\uDFAF", title: "One thing at a time", desc: "Smart scheduling picks your next task based on deadlines, wait times, what it unblocks, and your energy level." },
+                { icon: "\u26A1", title: "Agents work for you", desc: "Coding, research, drafting \u2014 AI agents handle their tasks automatically or give you a ready-to-paste prompt." },
+                { icon: "\uD83D\uDCC5", title: "Deadline-aware", desc: "Set deadlines and the scheduler adjusts \u2014 factoring in wait times so you start things early enough." },
+                { icon: "\uD83D\uDDA4", title: "ADHD-friendly", desc: "Break any task into tiny steps, focus on one thing, get welcome-back recaps, and track streaks." },
+              ].map((f) => (
+                <div key={f.title} style={{
+                  padding: "16px",
+                  borderRadius: 12,
+                  background: SURFACE,
+                  border: `1px solid ${BORDER}`,
+                }}>
+                  <div style={{ fontSize: 22, marginBottom: 6 }}>{f.icon}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: TEXT, marginBottom: 4 }}>{f.title}</div>
+                  <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.5 }}>{f.desc}</div>
+                </div>
+              ))}
+            </div>
 
-            {authError && (
-              <div style={{ fontSize: 12, color: "#CF522E", marginBottom: 12 }}>{authError}</div>
-            )}
+            {/* How it works */}
+            <div style={{ textAlign: "center", marginBottom: 40 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: TEXT, marginBottom: 16 }}>How it works</h2>
+              <div style={{ display: "flex", justifyContent: "center", gap: 32, flexWrap: "wrap" }}>
+                {[
+                  { step: "1", label: "Describe your project" },
+                  { step: "2", label: "Answer a few questions" },
+                  { step: "3", label: "Get your smart plan" },
+                  { step: "4", label: "Do one thing at a time" },
+                ].map((s) => (
+                  <div key={s.step} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{
+                      width: 28, height: 28, borderRadius: "50%",
+                      background: PRIMARY, color: "#fff",
+                      fontSize: 13, fontWeight: 700,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      flexShrink: 0,
+                    }}>{s.step}</span>
+                    <span style={{ fontSize: 13, color: TEXT, fontWeight: 500 }}>{s.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-            <button
-              onClick={async () => {
-                setAuthError("");
-                const fn = authMode === "signin" ? signInWithEmail : signUpWithEmail;
-                const { error } = await fn(authEmail, authPassword);
-                if (error) setAuthError(error.message);
-              }}
-              style={{
-                width: "100%",
-                padding: "10px 16px",
-                borderRadius: 10,
-                border: "none",
-                background: PRIMARY,
-                color: "#fff",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "'DM Sans', sans-serif",
-                marginBottom: 12,
-              }}
-            >
-              {authMode === "signin" ? "Sign in" : "Create account"}
-            </button>
+            {/* Auth form */}
+            <div style={{
+              maxWidth: 380,
+              margin: "0 auto",
+              padding: "28px 24px",
+              borderRadius: 14,
+              background: SURFACE,
+              border: `1px solid ${BORDER}`,
+              textAlign: "center",
+            }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4, color: TEXT }}>
+                {authMode === "signin" ? "Welcome back" : "Get started free"}
+              </h3>
+              <p style={{ color: TEXT_LIGHT, fontSize: 13, marginBottom: 16 }}>
+                {authMode === "signin" ? "Sign in to continue your projects." : "Create an account to save your plans and progress."}
+              </p>
 
-            <button
-              onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
-              style={{
-                background: "none",
-                border: "none",
-                color: PRIMARY,
-                fontSize: 13,
-                cursor: "pointer",
-                fontFamily: "'DM Sans', sans-serif",
-              }}
-            >
-              {authMode === "signin" ? "Need an account? Sign up" : "Already have an account? Sign in"}
-            </button>
+              <input
+                type="email"
+                placeholder="Email"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  fontSize: 14,
+                  fontFamily: "'DM Sans', sans-serif",
+                  borderRadius: 8,
+                  border: `1px solid ${BORDER}`,
+                  outline: "none",
+                  boxSizing: "border-box",
+                  marginBottom: 8,
+                }}
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  fontSize: 14,
+                  fontFamily: "'DM Sans', sans-serif",
+                  borderRadius: 8,
+                  border: `1px solid ${BORDER}`,
+                  outline: "none",
+                  boxSizing: "border-box",
+                  marginBottom: 12,
+                }}
+              />
+
+              {authError && (
+                <div style={{ fontSize: 12, color: "#CF522E", marginBottom: 12 }}>{authError}</div>
+              )}
+
+              <button
+                onClick={async () => {
+                  setAuthError("");
+                  const fn = authMode === "signin" ? signInWithEmail : signUpWithEmail;
+                  const { error } = await fn(authEmail, authPassword);
+                  if (error) setAuthError(error.message);
+                }}
+                style={{
+                  width: "100%",
+                  padding: "10px 16px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: PRIMARY,
+                  color: "#fff",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                  marginBottom: 12,
+                }}
+              >
+                {authMode === "signin" ? "Sign in" : "Create account"}
+              </button>
+
+              <button
+                onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: PRIMARY,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                {authMode === "signin" ? "Need an account? Sign up" : "Already have an account? Sign in"}
+              </button>
+            </div>
+
+            <p style={{ textAlign: "center", fontSize: 11, color: "#B0AFA8", marginTop: 24 }}>
+              Free to use. Bring your own AI tools to save on API costs.
+            </p>
           </div>
         )}
 
