@@ -19,8 +19,12 @@ export function useAuth() {
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
+      if (event === "PASSWORD_RECOVERY") {
+        // Supabase detected a recovery token — redirect to reset page
+        window.location.href = "/auth/reset-password";
+      }
     });
 
     return () => subscription.unsubscribe();
