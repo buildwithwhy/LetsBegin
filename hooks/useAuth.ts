@@ -44,6 +44,14 @@ export function useAuth() {
     return { error };
   }, []);
 
+  const resetPassword = useCallback(async (email: string) => {
+    if (!supabaseConfigured) return { error: { message: "Supabase not configured" } };
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: typeof window !== "undefined" ? `${window.location.origin}` : undefined,
+    });
+    return { error };
+  }, []);
+
   const signOut = useCallback(async () => {
     if (!supabaseConfigured) return;
     await supabase.auth.signOut();
@@ -51,5 +59,5 @@ export function useAuth() {
 
   const configured = supabaseConfigured;
 
-  return { user, loading, signInWithEmail, signUpWithEmail, signOut, configured };
+  return { user, loading, signInWithEmail, signUpWithEmail, resetPassword, signOut, configured };
 }
