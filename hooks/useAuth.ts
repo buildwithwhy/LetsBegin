@@ -47,7 +47,7 @@ export function useAuth() {
   const resetPassword = useCallback(async (email: string) => {
     if (!supabaseConfigured) return { error: { message: "Supabase not configured" } };
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: typeof window !== "undefined" ? `${window.location.origin}` : undefined,
+      redirectTo: typeof window !== "undefined" ? `${window.location.origin}/auth/callback?type=recovery` : undefined,
     });
     return { error };
   }, []);
