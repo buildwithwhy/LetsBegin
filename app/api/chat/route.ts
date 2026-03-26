@@ -1,10 +1,18 @@
 import { streamText } from "ai";
-import { selectModel } from "@/lib/models";
+import { selectModel, selectModelWithUserKey } from "@/lib/models";
 
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
   const { taskTitle, taskDescription, projectSummary, messages, priorResults, subtasks, systemContext } = await req.json();
+
+  // Check for user-provided API keys
+  const userKeys = {
+    anthropic: req.headers.get("x-user-anthropic-key"),
+    google: req.headers.get("x-user-google-key"),
+    openai: req.headers.get("x-user-openai-key"),
+  };
+  const hasUserKeys = !!(userKeys.anthropic || userKeys.google || userKeys.openai);
 
   // If a rich systemContext was provided by the client, use it directly.
   // Otherwise fall back to the legacy context-building approach.
@@ -33,27 +41,21 @@ export async function POST(req: Request) {
       }
     }
 
-    systemPrompt = `You are a helpful assistant guiding a user through a specific task in their project.
+    systemPrompt = `You are a helpful project assistant. The user is working on a specific task within a larger project. Help them think through the task, give advice, brainstorm approaches, or answer questions. Be concise and practical.
 
 Project context: ${projectSummary}
 ${priorContext}
-Current task: "${taskTitle}"
-Task description: ${taskDescription}
+Task: "${taskTitle}"
+Description: ${taskDescription}
 ${subtaskContext}
 
-Your job is to help the user complete THIS specific task. You have full context of what happened before — reference specific outputs, tools, files, or decisions from prior steps when relevant.
-
-Guidelines:
-- Keep responses concise and actionable
-- Use numbered steps when walking through a process
-- Reference specific details from prior task results (e.g., "The agent used X tool to create Y — you can find it at Z")
-- If a prior step produced something the user needs, tell them exactly where it is and what to do with it
-- If the user seems overwhelmed, break things into even smaller pieces
-- Be warm and supportive, especially when tasks feel intimidating`;
+Be conversational and helpful. Don't just suggest breaking down the task — engage with whatever the user is asking about.`;
   }
 
-  // Claude for chat — better context handling and reasoning
-  const { model } = selectModel("chat");
+  // Claude for chat — use user key if available, otherwise default
+  const { model } = hasUserKeys
+    ? selectModelWithUserKey("chat", userKeys)
+    : selectModel("chat");
 
   const result = streamText({
     model,
