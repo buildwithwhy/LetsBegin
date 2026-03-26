@@ -38,6 +38,7 @@ export default function Home() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [authSuccess, setAuthSuccess] = useState("");
   const [savedPlanId, setSavedPlanId] = useState<string | null>(null);
 
   const [step, setStep] = useState<Step>("dashboard");
@@ -1071,13 +1072,18 @@ export default function Home() {
               {authError && (
                 <div style={{ fontSize: 12, color: "#CF522E", marginBottom: 12 }}>{authError}</div>
               )}
+              {authSuccess && (
+                <div style={{ fontSize: 12, color: "#2DA44E", marginBottom: 12 }}>{authSuccess}</div>
+              )}
 
               <button
                 onClick={async () => {
                   setAuthError("");
+                  setAuthSuccess("");
                   const fn = authMode === "signin" ? signInWithEmail : signUpWithEmail;
                   const { error } = await fn(authEmail, authPassword);
                   if (error) setAuthError(error.message);
+                  else if (authMode === "signup") setAuthSuccess("Check your email to confirm your account!");
                 }}
                 style={{
                   width: "100%",
@@ -1097,7 +1103,7 @@ export default function Home() {
               </button>
 
               <button
-                onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
+                onClick={() => { setAuthMode(authMode === "signin" ? "signup" : "signin"); setAuthSuccess(""); setAuthError(""); }}
                 style={{
                   background: "none",
                   border: "none",
@@ -2132,6 +2138,11 @@ export default function Home() {
                   <span style={{ fontSize: 13, color: TEXT_LIGHT, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
                     {doneCount} of {total}
                   </span>
+                  {streak >= 1 && (
+                    <span style={{ fontSize: 12, color: TEXT_LIGHT, display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                      <span style={{ fontSize: 13 }}>{"\u26A1"}</span> {streak} done today
+                    </span>
+                  )}
                 </div>
 
                 {/* Energy check-in (only show if multiple tasks available) */}
@@ -2613,6 +2624,43 @@ export default function Home() {
                     )}
                   </div>
                 </div>
+
+                {/* Encouragement toast (project view) */}
+                {showEncouragement && (
+                  <div style={{
+                    padding: "10px 16px",
+                    borderRadius: 10,
+                    background: "#2DA44E12",
+                    border: "1px solid #2DA44E30",
+                    color: "#2DA44E",
+                    fontSize: 14,
+                    fontWeight: 500,
+                    marginBottom: 16,
+                    textAlign: "center",
+                    animation: "fadeIn 0.3s ease",
+                  }}>
+                    {showEncouragement}
+                    {streak >= 2 && (
+                      <span style={{ display: "block", fontSize: 12, marginTop: 2, opacity: 0.8 }}>
+                        {streak <= 5 ? (streakEncouragements[streak] || `${streak} tasks in a row!`) : `${streak} tasks straight. You're unstoppable.`}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Streak counter (project view) */}
+                {streak >= 1 && !showEncouragement && (
+                  <div style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    fontSize: 12,
+                    color: TEXT_LIGHT,
+                    marginBottom: 12,
+                  }}>
+                    <span style={{ fontSize: 13 }}>{"\u26A1"}</span> {streak} task{streak !== 1 ? "s" : ""} done today
+                  </div>
+                )}
 
                 {/* Filters */}
                 <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>

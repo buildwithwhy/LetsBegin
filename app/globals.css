@@ -2,3 +2,19 @@
 *, *::before, *::after {
   box-sizing: border-box;
 }
+
+/* Mobile responsive */
+@media (max-width: 480px) {
+  main {
+    padding: 20px 12px !important;
+  }
+  h1 {
+    font-size: 24px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  main {
+    padding: 28px 16px !important;
+  }
+}

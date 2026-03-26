@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, ENERGY_COLORS } from "@/lib/styles";
 import { ExecutionMode, PriorResult, TaskRouting, UserToolConfig, routeTask } from "@/lib/styles";
 import { Task, Subtask, DagNode, Energy, Assignee, AgentType, ActivityEvent, TaskCategory } from "@/lib/dag";
@@ -149,6 +149,38 @@ export function TaskCard({
   const [editingDeadline, setEditingDeadline] = useState(false);
   const [showDecompose, setShowDecompose] = useState(false);
   const [decomposing, setDecomposing] = useState(false);
+
+  // ADHD Task Timer
+  const [timerStartedAt, setTimerStartedAt] = useState<number | null>(null);
+  const [timerElapsed, setTimerElapsed] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const timerRunning = timerStartedAt !== null;
+
+  useEffect(() => {
+    if (timerStartedAt !== null && !isDone) {
+      timerRef.current = setInterval(() => {
+        setTimerElapsed(Math.floor((Date.now() - timerStartedAt) / 1000));
+      }, 1000);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [timerStartedAt, isDone]);
+
+  // Stop timer when task is done
+  useEffect(() => {
+    if (isDone && timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, [isDone]);
+
+  const formatTimer = (seconds: number) => {
+    const m = Math.floor(seconds / 60).toString().padStart(2, "0");
+    const s = (seconds % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  };
 
   const canDecompose = isPending && !isLocked && onDecompose &&
     (task.assignee === "user" || task.assignee === "hybrid") &&
@@ -374,10 +406,56 @@ export function TaskCard({
         />
       ) : (
         <div
-          style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, cursor: isPending && onEditTask ? "text" : "default" }}
-          onClick={() => { if (isPending && onEditTask) { setEditTitle(task.title); setEditingTitle(true); } }}
+          style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}
         >
-          {task.title}
+          <span
+            style={{ cursor: isPending && onEditTask ? "text" : "default" }}
+            onClick={() => { if (isPending && onEditTask) { setEditTitle(task.title); setEditingTitle(true); } }}
+          >
+            {task.title}
+          </span>
+          {isPending && !isDone && (
+            <>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (timerRunning) {
+                    // Pause
+                    if (timerRef.current) clearInterval(timerRef.current);
+                    timerRef.current = null;
+                    setTimerStartedAt(null);
+                  } else {
+                    // Start (resume from current elapsed)
+                    setTimerStartedAt(Date.now() - timerElapsed * 1000);
+                  }
+                }}
+                style={{
+                  padding: "2px 8px",
+                  borderRadius: 5,
+                  border: `1px solid ${BORDER}`,
+                  background: "transparent",
+                  color: timerRunning ? PRIMARY : TEXT_LIGHT,
+                  fontSize: 10,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                  flexShrink: 0,
+                }}
+              >
+                {timerRunning ? "Pause" : "Start"}
+              </button>
+              {timerElapsed > 0 && (
+                <span style={{ fontSize: 11, color: TEXT_LIGHT, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+                  {formatTimer(timerElapsed)}
+                </span>
+              )}
+            </>
+          )}
+          {isDone && timerElapsed > 0 && (
+            <span style={{ fontSize: 11, color: TEXT_LIGHT, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+              {formatTimer(timerElapsed)}
+            </span>
+          )}
         </div>
       )}
       {isPending && onEditTask && editingDesc ? (
