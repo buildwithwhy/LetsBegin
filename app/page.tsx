@@ -9,6 +9,8 @@ import {
   type Assignee,
   type AgentType,
   type ActivityEvent,
+  type TaskCategory,
+  type ProjectPriority,
   getAllTasks,
   computeUnlocked,
   scoreTasks,
@@ -25,7 +27,7 @@ import {
 } from "@/lib/styles";
 import { Header } from "@/components/Header";
 import { ThinkingTerminal } from "@/components/ThinkingTerminal";
-import { TaskCard } from "@/components/TaskCard";
+import { TaskCard, CATEGORY_ICONS, inferCategory } from "@/components/TaskCard";
 import { DagView } from "@/components/DagView";
 import { WelcomeBack } from "@/components/WelcomeBack";
 
@@ -39,7 +41,7 @@ export default function Home() {
   const [savedPlanId, setSavedPlanId] = useState<string | null>(null);
 
   const [step, setStep] = useState<Step>("dashboard");
-  const [savedPlans, setSavedPlans] = useState<{ id: string; brief: string; project_title: string; summary: string; nodes: DagNode[]; done_ids: string[]; done_subtask_ids: string[]; created_at: string; updated_at: string }[]>([]);
+  const [savedPlans, setSavedPlans] = useState<{ id: string; brief: string; project_title: string; summary: string; nodes: DagNode[]; done_ids: string[]; done_subtask_ids: string[]; priority: ProjectPriority; created_at: string; updated_at: string }[]>([]);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [brief, setBrief] = useState("");
   const voiceInput = useVoiceInput(useCallback((text: string) => {
@@ -94,6 +96,9 @@ export default function Home() {
   const [newTaskDeadline, setNewTaskDeadline] = useState("");
   const [lastVisitAt, setLastVisitAt] = useState<number | null>(null);
   const [showWelcomeBack, setShowWelcomeBack] = useState(false);
+  const [projectPriority, setProjectPriority] = useState<ProjectPriority>("medium");
+  const [focusCategory, setFocusCategory] = useState<TaskCategory | "all">("all");
+  const [detourDismissed, setDetourDismissed] = useState(false);
 
   const { execute, results, running, runningCount } = useAgentExecutor();
 
@@ -133,6 +138,9 @@ export default function Home() {
     setDoneIds(new Set(saved.done_ids));
     setDoneSubtaskIds(new Set(saved.done_subtask_ids));
     setSavedPlanId(saved.id);
+    setProjectPriority(saved.priority || "medium");
+    setFocusCategory("all");
+    setDetourDismissed(false);
     // Read last visit timestamp for welcome-back recap
     const visitKey = `letsbegin-last-visit-${saved.id}`;
     const storedVisit = localStorage.getItem(visitKey);
@@ -167,6 +175,9 @@ export default function Home() {
     setCurrentEnergy(null);
     setStreak(0);
     setShowBreakReminder(false);
+    setFocusCategory("all");
+    setDetourDismissed(false);
+    setProjectPriority("medium");
     setStep("input");
   }, [plan]);
 
@@ -215,6 +226,7 @@ export default function Home() {
       pendingHuman.length > 0 ? pendingHuman : pendingTasks,
       tasks,
       currentEnergy,
+      projectPriority,
     );
     const topPriority = scored[0];
     return {
@@ -226,7 +238,7 @@ export default function Home() {
       nextTaskReason: topPriority?.reasons[0],
       agentCompletedTitles,
     };
-  }, [showWelcomeBack, lastVisitAt, plan, doneIds, currentEnergy]);
+  }, [showWelcomeBack, lastVisitAt, plan, doneIds, currentEnergy, projectPriority]);
 
   // Encouragement messages for completing tasks
   const encouragements = [
@@ -415,12 +427,12 @@ export default function Home() {
   useEffect(() => {
     if (!plan || !user) return;
     const timeout = setTimeout(() => {
-      savePlan(brief, plan, doneIds, doneSubtaskIds).then((result) => {
+      savePlan(brief, plan, doneIds, doneSubtaskIds, projectPriority).then((result) => {
         if (result?.id && !savedPlanId) setSavedPlanId(result.id);
       });
     }, 1000); // Debounce 1s
     return () => clearTimeout(timeout);
-  }, [plan, doneIds, doneSubtaskIds, user, brief, savePlan, savedPlanId]);
+  }, [plan, doneIds, doneSubtaskIds, user, brief, savePlan, savedPlanId, projectPriority]);
 
   // Save last visit timestamp for new plans once savedPlanId is assigned
   useEffect(() => {
@@ -773,8 +785,20 @@ export default function Home() {
                       onMouseLeave={(e) => (e.currentTarget.style.borderColor = BORDER)}
                     >
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, color: isComplete ? "#2DA44E" : TEXT }}>
+                        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4, color: isComplete ? "#2DA44E" : TEXT, display: "flex", alignItems: "center", gap: 6 }}>
                           {isComplete && "\u2713 "}{saved.project_title || "Untitled project"}
+                          {saved.priority && saved.priority !== "medium" && (
+                            <span style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              padding: "1px 5px",
+                              borderRadius: 4,
+                              background: saved.priority === "high" ? "#CF522E18" : "#2DA44E18",
+                              color: saved.priority === "high" ? "#CF522E" : "#2DA44E",
+                            }}>
+                              {saved.priority === "high" ? "HIGH" : "LOW"}
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
                           {saved.summary?.slice(0, 100) || saved.brief?.slice(0, 100)}
@@ -1748,11 +1772,39 @@ export default function Home() {
             pendingHumanTasks.length > 0 ? pendingHumanTasks : pendingTasks,
             allTasks,
             currentEnergy,
+            projectPriority,
           );
-          const topPriority = scoredTasks[0];
+
+          // Apply focus category filter
+          const focusFilteredScored = focusCategory === "all"
+            ? scoredTasks
+            : scoredTasks.filter((sp) => inferCategory(sp.task) === focusCategory);
+          // Fall back to top unfiltered task if no matches
+          const effectiveScored = focusFilteredScored.length > 0 ? focusFilteredScored : scoredTasks;
+
+          const topPriority = effectiveScored[0];
           const oneThingTask: Task | undefined = topPriority?.task;
           const oneThingReasons = topPriority?.reasons || [];
           const allDone = allCurrentTasks.every((t) => doneIds.has(t.id));
+
+          // Categories present in current tasks
+          const presentCategories = Array.from(new Set(
+            allCurrentTasks
+              .filter((t) => t.status === "pending")
+              .map((t) => inferCategory(t))
+          ));
+
+          // Quick-detour: find a quick task with long wait to suggest
+          const detourTask = !detourDismissed && oneThingTask ? (() => {
+            const candidates = allCurrentTasks.filter((t) =>
+              t.status === "pending" &&
+              t.id !== oneThingTask.id &&
+              t.has_wait_after &&
+              (t.estimated_wait === "days" || t.estimated_wait === "weeks") &&
+              t.energy === "low"
+            );
+            return candidates[0] || null;
+          })() : null;
 
           return (
           <div>
@@ -1813,6 +1865,49 @@ export default function Home() {
                 {doneCount}/{total} done
               </span>
             </div>
+
+            {/* Focus category filter */}
+            {presentCategories.length > 1 && (
+              <div style={{ display: "flex", gap: 6, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11, color: "#aaa", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Focus</span>
+                <button
+                  onClick={() => setFocusCategory("all")}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 6,
+                    border: "none",
+                    background: focusCategory === "all" ? PRIMARY : BORDER,
+                    color: focusCategory === "all" ? "#fff" : "#666",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  All
+                </button>
+                {presentCategories.map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setFocusCategory(cat)}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 6,
+                      border: "none",
+                      background: focusCategory === cat ? PRIMARY : BORDER,
+                      color: focusCategory === cat ? "#fff" : "#666",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                      textTransform: "capitalize",
+                    }}
+                  >
+                    {CATEGORY_ICONS[cat]} {cat}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* ─── ONE THING MODE ─── */}
             {revealMode === "onething" && (
@@ -2059,6 +2154,44 @@ export default function Home() {
                       </div>
                     )}
 
+                    {/* Quick detour suggestion */}
+                    {detourTask && (
+                      <div style={{
+                        marginTop: 14,
+                        padding: "10px 14px",
+                        borderRadius: 8,
+                        border: `1px dashed ${BORDER}`,
+                        background: "#FAFAF9",
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 10,
+                      }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 11, color: "#D4A72C", fontWeight: 600, marginBottom: 3 }}>
+                            Quick detour
+                          </div>
+                          <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
+                            {detourTask.title} &mdash; do this now to avoid a {detourTask.estimated_wait === "weeks" ? "multi-week" : "multi-day"} wait later
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setDetourDismissed(true)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#B0AFA8",
+                            fontSize: 14,
+                            cursor: "pointer",
+                            padding: "0 2px",
+                            lineHeight: 1,
+                            flexShrink: 0,
+                          }}
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    )}
+
                     {/* What's happening in the background */}
                     {runningCount > 0 && (
                       <div
@@ -2255,9 +2388,43 @@ export default function Home() {
                     marginBottom: 24,
                   }}
                 >
-                  <h2 style={{ fontSize: 20, fontWeight: 700, marginTop: 0, marginBottom: 8 }}>
-                    {plan.project_title}
-                  </h2>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                    <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>
+                      {plan.project_title}
+                    </h2>
+                    <div style={{ display: "flex", gap: 2 }}>
+                      {(["high", "medium", "low"] as const).map((p) => {
+                        const labels = { high: "H", medium: "M", low: "L" };
+                        const colors = { high: "#CF522E", medium: "#D4A72C", low: "#2DA44E" };
+                        const isActive = projectPriority === p;
+                        return (
+                          <button
+                            key={p}
+                            onClick={() => setProjectPriority(p)}
+                            title={`${p} priority`}
+                            style={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: 5,
+                              border: isActive ? `1.5px solid ${colors[p]}` : `1px solid ${BORDER}`,
+                              background: isActive ? `${colors[p]}18` : "transparent",
+                              color: isActive ? colors[p] : TEXT_LIGHT,
+                              fontSize: 10,
+                              fontWeight: 700,
+                              cursor: "pointer",
+                              fontFamily: "'DM Sans', sans-serif",
+                              padding: 0,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            {labels[p]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                   <p style={{ fontSize: 14, color: "#787774", lineHeight: 1.6, marginBottom: 14 }}>
                     {plan.summary}
                   </p>
@@ -2483,6 +2650,7 @@ export default function Home() {
                   nodes={currentNodes}
                   energyFilter={energyFilter}
                   assigneeFilter={assigneeFilter}
+                  focusCategory={focusCategory}
                   results={results}
                   onMarkDone={markDone}
                   onRunAgent={handleRunAgent}

@@ -10,10 +10,10 @@ import {
   TEXT,
 } from "@/lib/styles";
 import type { ExecutionMode, PriorResult, UserToolConfig } from "@/lib/styles";
-import type { DagNode, Task, Energy, Assignee, AgentType } from "@/lib/dag";
+import type { DagNode, Task, Energy, Assignee, AgentType, TaskCategory } from "@/lib/dag";
 import { getAllTasks } from "@/lib/dag";
 import type { AgentResult } from "@/hooks/useAgentExecutor";
-import { TaskCard } from "@/components/TaskCard";
+import { TaskCard, inferCategory } from "@/components/TaskCard";
 
 function assigneeLabel(a: string) {
   return a === "agent" ? "\u26A1 Agent" : a === "user" ? "\uD83D\uDC64 User" : "\uD83E\uDD1D Hybrid";
@@ -66,6 +66,7 @@ export function DagView({
   nodes,
   energyFilter,
   assigneeFilter,
+  focusCategory,
   results,
   onMarkDone,
   onRunAgent,
@@ -84,6 +85,7 @@ export function DagView({
   nodes: DagNode[];
   energyFilter: Energy | "all";
   assigneeFilter: Assignee | "all";
+  focusCategory?: TaskCategory | "all";
   results: Record<string, AgentResult>;
   onMarkDone: (id: string, notes?: string) => void;
   onRunAgent: (task: Task, force?: boolean) => void;
@@ -121,10 +123,12 @@ export function DagView({
   const matchesFilters = (t: Task) => {
     if (energyFilter !== "all" && t.energy !== energyFilter) return false;
     if (assigneeFilter !== "all" && t.assignee !== assigneeFilter) return false;
+    if (focusCategory && focusCategory !== "all" && inferCategory(t) !== focusCategory) return false;
     return true;
   };
 
-  const filteredNodes = (energyFilter === "all" && assigneeFilter === "all")
+  const hasActiveFilters = energyFilter !== "all" || assigneeFilter !== "all" || (focusCategory && focusCategory !== "all");
+  const filteredNodes = !hasActiveFilters
     ? nodes
     : nodes
         .map((n) => {

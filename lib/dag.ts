@@ -33,6 +33,8 @@ export type ActivityEvent =
   | { type: "approved"; at: string }
   | { type: "regenerated"; at: string };
 
+export type TaskCategory = "coding" | "writing" | "emails" | "research" | "errands" | "calls" | "planning" | "review";
+
 export interface Task {
   id: string;
   type: "task";
@@ -57,6 +59,8 @@ export interface Task {
   notes?: string;  // human-written notes on this task
   started_at?: string;  // when this task was first acted on
   completed_at?: string;  // when this task was marked done
+  // Focus category
+  category?: TaskCategory;  // what kind of work this task represents
 }
 
 export interface ParallelGroup {
@@ -137,10 +141,13 @@ export interface TaskPriority {
   reasons: string[];
 }
 
+export type ProjectPriority = "high" | "medium" | "low";
+
 export function scoreTasks(
   pendingTasks: Task[],
   allTasks: Task[],
   currentEnergy: Energy | null,
+  projectPriority?: ProjectPriority,
 ): TaskPriority[] {
   // Build a map of how many tasks each task unblocks (downstream count)
   const downstreamCount = new Map<string, number>();
@@ -236,6 +243,15 @@ export function scoreTasks(
     // If low energy, boost low-energy tasks more
     if (currentEnergy === "low" && task.energy === "low") {
       score += 5;
+    }
+
+    // 6. Project priority boost
+    if (projectPriority === "high") {
+      score += 20;
+      reasons.push("High priority project");
+    } else if (projectPriority === "low") {
+      score -= 10;
+      reasons.push("Low priority project");
     }
 
     return { task, score, reasons };

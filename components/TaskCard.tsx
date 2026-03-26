@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { PRIMARY, BORDER, TEXT, TEXT_LIGHT, SURFACE, ENERGY_COLORS } from "@/lib/styles";
 import { ExecutionMode, PriorResult, TaskRouting, UserToolConfig, routeTask } from "@/lib/styles";
-import { Task, Subtask, DagNode, Energy, Assignee, AgentType, ActivityEvent } from "@/lib/dag";
+import { Task, Subtask, DagNode, Energy, Assignee, AgentType, ActivityEvent, TaskCategory } from "@/lib/dag";
 import { AgentResult, AgentStep } from "@/hooks/useAgentExecutor";
 import { AgentPanel } from "@/components/AgentPanel";
 import { SubtaskList, SubtaskItem } from "@/components/SubtaskList";
@@ -45,6 +45,23 @@ function inferTaskType(task: Task): "coding" | "writing" | "research" | "plannin
   if (lower.match(/plan|design|architect|strategy|roadmap|outline/)) return "planning";
   if (lower.match(/review|audit|check|evaluate|assess|approve/)) return "review";
   return "writing";
+}
+
+export const CATEGORY_ICONS: Record<TaskCategory, string> = {
+  coding: "\uD83D\uDCBB",
+  writing: "\u270D\uFE0F",
+  emails: "\uD83D\uDCE7",
+  research: "\uD83D\uDD0D",
+  errands: "\uD83D\uDCE6",
+  calls: "\uD83D\uDCDE",
+  planning: "\uD83D\uDCCB",
+  review: "\uD83D\uDC40",
+};
+
+export function inferCategory(task: Task): TaskCategory {
+  if (task.category) return task.category;
+  const inferred = inferTaskType(task);
+  return inferred as TaskCategory;
 }
 
 // ─── ActivityLog ───
@@ -264,6 +281,27 @@ export function TaskCard({
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: ENERGY_COLORS[task.energy] }} />
             {task.energy}
           </span>
+          {(() => {
+            const cat = inferCategory(task);
+            return (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 3,
+                  padding: "2px 7px",
+                  borderRadius: 5,
+                  background: "#78777414",
+                  color: "#787774",
+                  fontSize: 10,
+                  fontWeight: 500,
+                  textTransform: "capitalize",
+                }}
+              >
+                {CATEGORY_ICONS[cat]} {cat}
+              </span>
+            );
+          })()}
           {task.deadline && !editingDeadline && (() => {
             const info = getDeadlineInfo(task.deadline);
             return (
