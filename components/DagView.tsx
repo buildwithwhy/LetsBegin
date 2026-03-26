@@ -81,6 +81,8 @@ export function DagView({
   onDecompose,
   doneIds,
   currentNodes,
+  onReopen,
+  byoKeys,
 }: {
   nodes: DagNode[];
   energyFilter: Energy | "all";
@@ -100,6 +102,8 @@ export function DagView({
   onDecompose?: (taskId: string, granularity: "normal" | "detailed" | "tiny") => Promise<void>;
   doneIds?: Set<string>;
   currentNodes?: DagNode[];
+  onReopen?: (id: string) => void;
+  byoKeys?: { anthropic?: string; google?: string; openai?: string };
 }) {
   const [view, setView] = useState<"steps" | "graph">("steps");
   const [completedExpanded, setCompletedExpanded] = useState(false);
@@ -205,6 +209,8 @@ export function DagView({
                 onDecompose={onDecompose}
                 doneIds={doneIds}
                 currentNodes={currentNodes}
+                onReopen={onReopen}
+                byoKeys={byoKeys}
               />
             );
           }
@@ -248,6 +254,8 @@ export function DagView({
                     onDecompose={onDecompose}
                     doneIds={doneIds}
                     currentNodes={currentNodes}
+                    onReopen={onReopen}
+                    byoKeys={byoKeys}
                   />
                 ))}
               </div>
