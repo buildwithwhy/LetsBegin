@@ -102,6 +102,15 @@ export default function Home() {
   const [focusCategory, setFocusCategory] = useState<TaskCategory | "all">("all");
   const [detourDismissed, setDetourDismissed] = useState(false);
 
+  // BYO clarify/plan state
+  const [byoClarifyPrompt, setByoClarifyPrompt] = useState("");
+  const [byoPlanPrompt, setByoPlanPrompt] = useState("");
+  const [byoJsonInput, setByoJsonInput] = useState("");
+  const [byoJsonError, setByoJsonError] = useState("");
+  const [byoClarifyActive, setByoClarifyActive] = useState(false);
+  const [byoPlanActive, setByoPlanActive] = useState(false);
+  const [byoCopied, setByoCopied] = useState(false);
+
   // "Your Day" dashboard state
   const [globalFocusMode, setGlobalFocusMode] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
@@ -618,10 +627,33 @@ export default function Home() {
   };
 
   const handleClarify = async () => {
-    setClarifyLoading(true);
     setClarifyError("");
     setQuestionIndex(0);
     setStep("clarify");
+    setByoJsonInput("");
+    setByoJsonError("");
+
+    // BYO mode: show prompt for user to copy to their AI
+    if (executionMode === "byo" && userTools.available.length > 0) {
+      const prompt = `I'm planning a project: "${brief}"
+
+Generate 3-5 clarifying questions to ask me before planning. For each question, provide:
+- An id (short slug)
+- The question text
+- Type: "yes_no", "choice", or "short"
+- Options array (for choice type only)
+
+Return as JSON: { "questions": [{ "id": "...", "question": "...", "type": "...", "options": [...] }] }`;
+      setByoClarifyPrompt(prompt);
+      setByoClarifyActive(true);
+      setClarifyLoading(false);
+      setQuestions([]);
+      return;
+    }
+
+    // API mode: call our API
+    setByoClarifyActive(false);
+    setClarifyLoading(true);
     try {
       const res = await fetch("/api/clarify", {
         method: "POST",
@@ -657,6 +689,72 @@ export default function Home() {
     }
   };
 
+  const handleByoClarifyPaste = () => {
+    setByoJsonError("");
+    let raw = byoJsonInput.trim();
+    // Strip markdown code fences
+    raw = raw.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "");
+    try {
+      const data = JSON.parse(raw);
+      const qs: ClarifyQuestion[] = data.questions || data;
+      if (!Array.isArray(qs) || qs.length === 0) {
+        setByoJsonError("Expected a JSON object with a \"questions\" array containing at least one question.");
+        return;
+      }
+      // Validate minimal shape
+      for (const q of qs) {
+        if (!q.id || !q.question || !q.type) {
+          setByoJsonError("Each question needs id, question, and type fields.");
+          return;
+        }
+      }
+      setQuestions(qs);
+      const initialAnswers: Record<string, string> = {};
+      qs.forEach((q) => { initialAnswers[q.id] = ""; });
+      setAnswers(initialAnswers);
+      setByoClarifyActive(false);
+    } catch {
+      setByoJsonError("Invalid JSON. Make sure you copied the full response from your AI tool.");
+    }
+  };
+
+  const handleClarifyFallbackToApi = async () => {
+    setByoClarifyActive(false);
+    setClarifyLoading(true);
+    setClarifyError("");
+    try {
+      const res = await fetch("/api/clarify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brief }),
+      });
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        setClarifyError(`Server returned non-JSON (HTTP ${res.status}): ${text.slice(0, 300)}`);
+        setQuestions([]);
+        return;
+      }
+      if (!res.ok || data.error) {
+        setClarifyError(data.error || `HTTP ${res.status}`);
+        setQuestions([]);
+        return;
+      }
+      const qs = data.questions || [];
+      setQuestions(qs);
+      const initialAnswers: Record<string, string> = {};
+      qs.forEach((q: ClarifyQuestion) => { initialAnswers[q.id] = ""; });
+      setAnswers(initialAnswers);
+    } catch (err) {
+      setClarifyError(String(err));
+      setQuestions([]);
+    } finally {
+      setClarifyLoading(false);
+    }
+  };
+
   const buildEnrichedBrief = () => {
     let enriched = brief;
     const answered = Object.entries(answers).filter(([, v]) => v);
@@ -671,6 +769,157 @@ export default function Home() {
       enriched += "\n\nIMPORTANT: The user wants to do EVERYTHING themselves — no AI agents. Make ALL tasks assignee 'user'. Break tasks into very concrete, small steps. This person may have executive function challenges, so: be specific, be encouraging, and make each step feel achievable.";
     }
     return enriched;
+  };
+
+  const handleByoPlanPaste = () => {
+    setByoJsonError("");
+    let raw = byoJsonInput.trim();
+    // Strip markdown code fences
+    raw = raw.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "");
+    try {
+      const data = JSON.parse(raw);
+      if (!data.project_title || !data.summary || !Array.isArray(data.nodes)) {
+        setByoJsonError("Expected JSON with project_title, summary, and nodes array.");
+        return;
+      }
+      if (data.nodes.length === 0) {
+        setByoJsonError("Plan must contain at least one node/task.");
+        return;
+      }
+      // Validate nodes have required fields
+      const allTasks: Task[] = [];
+      for (const node of data.nodes) {
+        if (node.type === "task") {
+          if (!node.id || !node.title) {
+            setByoJsonError("Each task needs at least id and title fields.");
+            return;
+          }
+          if (!node.depends_on) node.depends_on = [];
+          if (!node.status) node.status = "pending";
+          allTasks.push(node);
+        } else if (node.type === "parallel_group") {
+          if (!node.id || !Array.isArray(node.children)) {
+            setByoJsonError("Each parallel_group needs id and children array.");
+            return;
+          }
+          if (!node.depends_on) node.depends_on = [];
+          for (const child of node.children) {
+            if (!child.id || !child.title) {
+              setByoJsonError("Each task inside a parallel_group needs id and title.");
+              return;
+            }
+            if (!child.depends_on) child.depends_on = [];
+            if (!child.status) child.status = "pending";
+            allTasks.push(child);
+          }
+        }
+      }
+      const receivedPlan: Plan = justMeMode ? convertToJustMe(data) : data;
+      const unlockedNodes = computeUnlocked(receivedPlan.nodes, new Set());
+      setPlan({ ...receivedPlan, nodes: unlockedNodes });
+      setDoneIds(new Set());
+      setDoneSubtaskIds(new Set());
+      setByoPlanActive(false);
+      setStep("reveal");
+    } catch {
+      setByoJsonError("Invalid JSON. Make sure you copied the full response from your AI tool.");
+    }
+  };
+
+  const handleCompileFallbackToApi = async () => {
+    setByoPlanActive(false);
+    setCompileStartTime(Date.now());
+    setCompileError("");
+    setThinkingText("");
+    setCompileStatus("Thinking through your brief...");
+    setElapsed(0);
+
+    const enrichedBrief = buildEnrichedBrief();
+
+    try {
+      const res = await fetch("/api/compile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brief: enrichedBrief, attachments }),
+      });
+
+      const reader = res.body?.getReader();
+      if (!reader) {
+        setCompileError("Failed to connect to the server. Please try again.");
+        setCompileStartTime(null);
+        setStep("input");
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line);
+              if (event.type === "thought") {
+                setThinkingText((prev) => prev + event.text);
+              } else if (event.type === "status") {
+                setCompileStatus(event.text);
+              } else if (event.type === "plan") {
+                setCompileStartTime(null);
+                const receivedPlan = justMeMode ? convertToJustMe(event.plan) : event.plan;
+                setPlan(receivedPlan);
+                setStep("reveal");
+              } else if (event.type === "subtasks") {
+                setPlan((prev) => {
+                  if (!prev) return prev;
+                  const subtaskMap = new Map<string, string[]>();
+                  for (const t of event.tasks) {
+                    subtaskMap.set(t.id, t.subtasks);
+                  }
+                  const updatedNodes = prev.nodes.map((node: DagNode) => {
+                    if (node.type === "task" && subtaskMap.has(node.id)) {
+                      return { ...node, subtasks: subtaskMap.get(node.id) };
+                    }
+                    if (node.type === "parallel_group") {
+                      return {
+                        ...node,
+                        children: node.children.map((child: Task) =>
+                          subtaskMap.has(child.id)
+                            ? { ...child, subtasks: subtaskMap.get(child.id) }
+                            : child
+                        ),
+                      };
+                    }
+                    return node;
+                  });
+                  return { ...prev, nodes: updatedNodes as DagNode[] };
+                });
+              } else if (event.type === "error") {
+                setCompileStatus("error:" + (event.text || "Unknown error"));
+                setCompileStartTime(null);
+              }
+            } catch {
+              // skip malformed lines
+            }
+          }
+        }
+      } catch {
+        setCompileError("Connection lost while building your plan. Please try again.");
+        setCompileStartTime(null);
+        setStep("input");
+      }
+    } catch (err) {
+      setCompileError("Failed to build plan: " + String(err));
+      setCompileStartTime(null);
+      setStep("input");
+    }
   };
 
   // Convert a plan to all-user tasks when in "just me" mode
@@ -692,11 +941,109 @@ export default function Home() {
     setStep("compiling");
     setThinkingText("");
     setCompileStatus("Thinking through your brief...");
-    setCompileStartTime(Date.now());
+    setCompileStartTime(null);
     setCompileError("");
     setElapsed(0);
+    setByoJsonInput("");
+    setByoJsonError("");
 
     const enrichedBrief = buildEnrichedBrief();
+
+    // BYO mode: show prompt for user to copy to their AI
+    if (executionMode === "byo" && userTools.available.length > 0) {
+      const todayDate = new Date().toISOString().split("T")[0];
+      const prompt = `You are a project planning assistant. A user has given you this project brief:
+
+"${enrichedBrief}"
+
+Generate a structured project plan as a DAG (directed acyclic graph) of tasks.
+
+Rules:
+- Each task needs a unique id (use short slugs like "setup-account", "draft-description")
+- The "type" field must be exactly "task" for individual tasks or "parallel_group" for groups of parallel tasks
+- depends_on lists the ids of tasks that must complete before this task can start
+- The first task(s) should have an empty depends_on array
+- Use parallel_group to group tasks that can run simultaneously (they share the same dependencies)
+- Children inside a parallel_group can depend on tasks outside the group (via the group's depends_on) but should not depend on each other
+- All tasks must have status: "pending" (the system will compute locked/unlocked states)
+- assignee is "agent" (AI can fully automate), "user" (human must do it), or "hybrid" (agent drafts, human reviews)
+- energy is "high" (significant effort), "medium" (moderate effort), or "low" (quick task)
+- Do NOT include subtasks — keep this lean
+
+AGENT TYPE ASSIGNMENT:
+For tasks with assignee "agent" or "hybrid", set agent_type:
+- "claude-code": Tasks that need real coding, implementation, debugging, complex reasoning, or working with code repositories.
+- "builtin": Simpler agent tasks — drafting content, researching, generating text, filling templates.
+- Leave agent_type undefined for "user" tasks.
+
+CRITICAL — DEPENDENCY RULES:
+A dependency (depends_on) means: "this task LITERALLY CANNOT START without the OUTPUT of that task." Not "it would be nice to do first" — it means IMPOSSIBLE without it.
+
+For EVERY dependency you add, ask: "What specific output from task A does task B need?" If you can't name it, there is no dependency.
+
+CROSS-TYPE DEPENDENCIES (most important):
+- Agent tasks CAN depend on user tasks IF the agent needs something only the human can provide
+- User tasks CAN depend on agent tasks IF the user needs the agent's output to act
+- But MOST agent tasks and user tasks are INDEPENDENT and should run in parallel
+
+NEVER DO THIS:
+- Serial chain where everything depends on the previous task
+- Agent task waiting on a user task when it doesn't need the user's output
+- Marking tasks as dependent just because they're in the same topic area
+
+ALWAYS DO THIS:
+- Multiple tasks with empty depends_on (things that can start immediately)
+- Use parallel_group for tasks with identical dependencies
+- Let agents and humans work simultaneously whenever their tasks are independent
+
+SCHEDULING INTELLIGENCE — WAIT TIMES:
+For any task where completion triggers a WAIT before the next step can happen, set:
+- has_wait_after: true
+- wait_type: "response", "build", "approval", "processing", "shipping", or "other"
+- estimated_wait: "minutes", "hours", "days", or "weeks"
+
+DEADLINES:
+If the user mentions any deadlines, due dates, or time constraints, tag tasks with a \`deadline\` ISO date string. Today's date is ${todayDate}. Only set deadline on tasks that actually have time constraints.
+
+TASK CATEGORIES:
+Tag each task with a \`category\` from: coding, writing, emails, research, errands, calls, planning, review.
+
+Return as JSON with this structure:
+{
+  "project_title": "Short project title",
+  "summary": "1-2 sentence summary",
+  "nodes": [
+    {
+      "type": "task",
+      "id": "slug-id",
+      "title": "Task title",
+      "description": "What to do",
+      "status": "pending",
+      "assignee": "user" | "agent" | "hybrid",
+      "agent_type": "claude-code" | "builtin",
+      "energy": "high" | "medium" | "low",
+      "category": "coding" | "writing" | "emails" | "research" | "errands" | "calls" | "planning" | "review",
+      "depends_on": ["other-task-id"]
+    },
+    {
+      "type": "parallel_group",
+      "id": "group-id",
+      "depends_on": ["other-task-id"],
+      "children": [ ...tasks... ]
+    }
+  ]
+}
+
+Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the dependency graph is valid — no circular dependencies, and every id referenced in depends_on must exist.`;
+      setByoPlanPrompt(prompt);
+      setByoPlanActive(true);
+      setCompileStartTime(null);
+      return;
+    }
+
+    // API mode
+    setByoPlanActive(false);
+    setCompileStartTime(Date.now());
 
     try {
       const res = await fetch("/api/compile", {
@@ -1967,7 +2314,181 @@ export default function Home() {
               <span style={{ color: BORDER }}>&gt;</span>
               <span>New project</span>
             </div>
-            {clarifyLoading ? (
+            {byoClarifyActive ? (
+              <div>
+                {/* Tool badge */}
+                {(() => {
+                  const firstTool = userTools.preferred || userTools.available[0];
+                  const cap = firstTool ? TOOL_CAPABILITIES[firstTool] : null;
+                  return cap ? (
+                    <div style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      padding: "4px 10px", borderRadius: 6,
+                      background: "#E8F0FE", color: "#1967D2", fontSize: 12, fontWeight: 600, marginBottom: 12,
+                    }}>
+                      {cap.icon} Clarify with {cap.label}
+                    </div>
+                  ) : null;
+                })()}
+
+                {/* Step indicators */}
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 0,
+                  marginBottom: 14, fontSize: 12, fontFamily: "'DM Sans', sans-serif",
+                }}>
+                  {[
+                    { num: 1, label: "Copy prompt", active: !byoJsonInput.trim() && questions.length === 0, done: !!byoJsonInput.trim() || questions.length > 0 },
+                    { num: 2, label: "Paste questions JSON", active: !!byoJsonInput.trim() && questions.length === 0, done: questions.length > 0 },
+                    { num: 3, label: "Answer questions", active: questions.length > 0, done: false },
+                  ].map((s, i) => (
+                    <div key={s.num} style={{ display: "flex", alignItems: "center" }}>
+                      <div style={{
+                        display: "flex", alignItems: "center", gap: 5,
+                        padding: "4px 10px", borderRadius: 20,
+                        background: s.active ? `${PRIMARY}14` : s.done ? "#2DA44E12" : "transparent",
+                        border: `1px solid ${s.active ? PRIMARY : s.done ? "#2DA44E40" : BORDER}`,
+                        color: s.active ? PRIMARY : s.done ? "#2DA44E" : TEXT_LIGHT,
+                        fontWeight: s.active ? 600 : 400,
+                        transition: "all 0.2s",
+                      }}>
+                        <span style={{
+                          width: 18, height: 18, borderRadius: 9,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 10, fontWeight: 700,
+                          background: s.done ? "#2DA44E" : s.active ? PRIMARY : BORDER,
+                          color: s.done || s.active ? "#fff" : TEXT_LIGHT,
+                        }}>
+                          {s.done ? "\u2713" : s.num}
+                        </span>
+                        {s.label}
+                      </div>
+                      {i < 2 && (
+                        <div style={{ width: 20, height: 1, background: s.done ? "#2DA44E60" : BORDER, margin: "0 2px" }} />
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ fontSize: 12, color: TEXT_LIGHT, marginBottom: 10, fontStyle: "italic" }}>
+                  This saves API costs by using your own AI
+                </div>
+
+                {/* Copyable prompt block */}
+                <div
+                  onClick={() => {
+                    navigator.clipboard.writeText(byoClarifyPrompt).then(() => {
+                      setByoCopied(true);
+                      setTimeout(() => setByoCopied(false), 2000);
+                    });
+                  }}
+                  style={{
+                    background: "#1C1C1E", borderRadius: 10,
+                    padding: 14, fontSize: 12,
+                    fontFamily: "'DM Mono', 'Fira Code', monospace",
+                    lineHeight: 1.5, color: "#8FBC8F",
+                    marginBottom: 8, cursor: "pointer",
+                    whiteSpace: "pre-wrap", wordBreak: "break-word",
+                    maxHeight: 200, overflow: "auto",
+                    position: "relative",
+                  }}
+                  title="Click to copy prompt"
+                >
+                  {byoClarifyPrompt}
+                </div>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(byoClarifyPrompt).then(() => {
+                      setByoCopied(true);
+                      setTimeout(() => setByoCopied(false), 2000);
+                    });
+                  }}
+                  style={{
+                    padding: "7px 16px", border: "none", borderRadius: 8,
+                    background: byoCopied ? "#2DA44E" : PRIMARY,
+                    color: "#fff", fontSize: 13, fontWeight: 600,
+                    cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                    marginBottom: 14, transition: "background 0.2s",
+                  }}
+                >
+                  {byoCopied ? "\u2713 Copied!" : "Copy prompt"}
+                </button>
+
+                {/* Paste area */}
+                <div style={{ marginTop: 4 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: TEXT, display: "block", marginBottom: 6 }}>
+                    Paste the JSON result from your AI:
+                  </label>
+                  <textarea
+                    value={byoJsonInput}
+                    onChange={(e) => { setByoJsonInput(e.target.value); setByoJsonError(""); }}
+                    placeholder={'{\n  "questions": [\n    { "id": "scope", "question": "...", "type": "short" }\n  ]\n}'}
+                    style={{
+                      width: "100%", minHeight: 120, padding: 12, fontSize: 13,
+                      fontFamily: "'DM Mono', 'Fira Code', monospace", borderRadius: 10,
+                      border: `1.5px solid ${byoJsonError ? "#CF522E" : BORDER}`,
+                      background: "#FAFAF9",
+                      outline: "none", resize: "vertical", lineHeight: 1.5,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  {byoJsonError && (
+                    <div style={{ fontSize: 12, color: "#CF522E", marginTop: 6 }}>{byoJsonError}</div>
+                  )}
+                </div>
+
+                {/* Action buttons */}
+                <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
+                  {byoJsonInput.trim() && (
+                    <button
+                      onClick={handleByoClarifyPaste}
+                      style={{
+                        padding: "10px 24px", border: "none", borderRadius: 10,
+                        background: PRIMARY, color: "#fff", fontSize: 14, fontWeight: 600,
+                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      Load questions
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setByoClarifyActive(false);
+                      setAnswers({});
+                      handleCompile();
+                    }}
+                    style={{
+                      padding: "10px 20px", border: `1px solid ${BORDER}`, borderRadius: 10,
+                      background: SURFACE, color: TEXT_LIGHT, fontSize: 13,
+                      cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    Skip questions
+                  </button>
+                  <button
+                    onClick={handleClarifyFallbackToApi}
+                    style={{
+                      padding: "10px 16px", border: "none", borderRadius: 10,
+                      background: "transparent", color: TEXT_LIGHT, fontSize: 12,
+                      cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      textDecoration: "underline", textDecorationStyle: "dotted" as const,
+                    }}
+                  >
+                    Use our AI instead
+                  </button>
+                  <div style={{ flex: 1 }} />
+                  <button
+                    onClick={() => setStep("input")}
+                    style={{
+                      padding: "10px 16px", border: `1px solid ${BORDER}`, borderRadius: 10,
+                      background: "transparent", color: TEXT_LIGHT, fontSize: 13,
+                      cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    &larr; Back to brief
+                  </button>
+                </div>
+              </div>
+            ) : clarifyLoading ? (
               <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 40 }}>
                 <div
                   style={{
@@ -2284,7 +2805,175 @@ export default function Home() {
               <span style={{ color: BORDER }}>&gt;</span>
               <span>New project</span>
             </div>
-            {compileStatus.startsWith("error:") ? (
+            {byoPlanActive ? (
+              <div>
+                {/* Tool badge */}
+                {(() => {
+                  const firstTool = userTools.preferred || userTools.available[0];
+                  const cap = firstTool ? TOOL_CAPABILITIES[firstTool] : null;
+                  return cap ? (
+                    <div style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      padding: "4px 10px", borderRadius: 6,
+                      background: "#E8F0FE", color: "#1967D2", fontSize: 12, fontWeight: 600, marginBottom: 12,
+                    }}>
+                      {cap.icon} Plan with {cap.label}
+                    </div>
+                  ) : null;
+                })()}
+
+                {/* Step indicators */}
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 0,
+                  marginBottom: 14, fontSize: 12, fontFamily: "'DM Sans', sans-serif",
+                }}>
+                  {[
+                    { num: 1, label: "Copy prompt", active: !byoJsonInput.trim(), done: !!byoJsonInput.trim() },
+                    { num: 2, label: "Paste plan JSON", active: !!byoJsonInput.trim(), done: false },
+                  ].map((s, i) => (
+                    <div key={s.num} style={{ display: "flex", alignItems: "center" }}>
+                      <div style={{
+                        display: "flex", alignItems: "center", gap: 5,
+                        padding: "4px 10px", borderRadius: 20,
+                        background: s.active ? `${PRIMARY}14` : s.done ? "#2DA44E12" : "transparent",
+                        border: `1px solid ${s.active ? PRIMARY : s.done ? "#2DA44E40" : BORDER}`,
+                        color: s.active ? PRIMARY : s.done ? "#2DA44E" : TEXT_LIGHT,
+                        fontWeight: s.active ? 600 : 400,
+                        transition: "all 0.2s",
+                      }}>
+                        <span style={{
+                          width: 18, height: 18, borderRadius: 9,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 10, fontWeight: 700,
+                          background: s.done ? "#2DA44E" : s.active ? PRIMARY : BORDER,
+                          color: s.done || s.active ? "#fff" : TEXT_LIGHT,
+                        }}>
+                          {s.done ? "\u2713" : s.num}
+                        </span>
+                        {s.label}
+                      </div>
+                      {i < 1 && (
+                        <div style={{ width: 20, height: 1, background: s.done ? "#2DA44E60" : BORDER, margin: "0 2px" }} />
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8, color: TEXT }}>
+                  Generate your plan
+                </h2>
+                <div style={{ fontSize: 12, color: TEXT_LIGHT, marginBottom: 12, fontStyle: "italic" }}>
+                  This saves API costs by using your own AI
+                </div>
+
+                {/* Copyable prompt block */}
+                <div
+                  onClick={() => {
+                    navigator.clipboard.writeText(byoPlanPrompt).then(() => {
+                      setByoCopied(true);
+                      setTimeout(() => setByoCopied(false), 2000);
+                    });
+                  }}
+                  style={{
+                    background: "#1C1C1E", borderRadius: 10,
+                    padding: 14, fontSize: 11,
+                    fontFamily: "'DM Mono', 'Fira Code', monospace",
+                    lineHeight: 1.5, color: "#8FBC8F",
+                    marginBottom: 8, cursor: "pointer",
+                    whiteSpace: "pre-wrap", wordBreak: "break-word",
+                    maxHeight: 240, overflow: "auto",
+                    position: "relative",
+                  }}
+                  title="Click to copy prompt"
+                >
+                  {byoPlanPrompt}
+                </div>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(byoPlanPrompt).then(() => {
+                      setByoCopied(true);
+                      setTimeout(() => setByoCopied(false), 2000);
+                    });
+                  }}
+                  style={{
+                    padding: "7px 16px", border: "none", borderRadius: 8,
+                    background: byoCopied ? "#2DA44E" : PRIMARY,
+                    color: "#fff", fontSize: 13, fontWeight: 600,
+                    cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                    marginBottom: 16, transition: "background 0.2s",
+                  }}
+                >
+                  {byoCopied ? "\u2713 Copied!" : "Copy prompt"}
+                </button>
+
+                {/* Paste area — prominently styled */}
+                <div style={{
+                  padding: 16, borderRadius: 12,
+                  border: `2px solid ${byoJsonInput.trim() ? PRIMARY : BORDER}`,
+                  background: byoJsonInput.trim() ? `${PRIMARY}06` : SURFACE,
+                  transition: "all 0.2s",
+                }}>
+                  <label style={{ fontSize: 14, fontWeight: 600, color: TEXT, display: "block", marginBottom: 8 }}>
+                    Paste the plan JSON from your AI:
+                  </label>
+                  <textarea
+                    value={byoJsonInput}
+                    onChange={(e) => { setByoJsonInput(e.target.value); setByoJsonError(""); }}
+                    placeholder={'{\n  "project_title": "My Project",\n  "summary": "...",\n  "nodes": [\n    { "type": "task", "id": "...", "title": "...", ... }\n  ]\n}'}
+                    style={{
+                      width: "100%", minHeight: 160, padding: 12, fontSize: 12,
+                      fontFamily: "'DM Mono', 'Fira Code', monospace", borderRadius: 10,
+                      border: `1.5px solid ${byoJsonError ? "#CF522E" : BORDER}`,
+                      background: "#fff",
+                      outline: "none", resize: "vertical", lineHeight: 1.5,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  {byoJsonError && (
+                    <div style={{ fontSize: 12, color: "#CF522E", marginTop: 6 }}>{byoJsonError}</div>
+                  )}
+                </div>
+
+                {/* Action buttons */}
+                <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap", alignItems: "center" }}>
+                  {byoJsonInput.trim() && (
+                    <button
+                      onClick={handleByoPlanPaste}
+                      style={{
+                        padding: "10px 28px", border: "none", borderRadius: 10,
+                        background: PRIMARY, color: "#fff", fontSize: 14, fontWeight: 600,
+                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                        boxShadow: `0 1px 3px ${PRIMARY}40`,
+                      }}
+                    >
+                      Build plan from JSON
+                    </button>
+                  )}
+                  <button
+                    onClick={handleCompileFallbackToApi}
+                    style={{
+                      padding: "10px 16px", border: "none", borderRadius: 10,
+                      background: "transparent", color: TEXT_LIGHT, fontSize: 12,
+                      cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      textDecoration: "underline", textDecorationStyle: "dotted" as const,
+                    }}
+                  >
+                    Use our API instead
+                  </button>
+                  <div style={{ flex: 1 }} />
+                  <button
+                    onClick={() => setStep("input")}
+                    style={{
+                      padding: "10px 16px", border: `1px solid ${BORDER}`, borderRadius: 10,
+                      background: "transparent", color: TEXT_LIGHT, fontSize: 13,
+                      cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    &larr; Back to brief
+                  </button>
+                </div>
+              </div>
+            ) : compileStatus.startsWith("error:") ? (
               <div>
                 <div style={{
                   background: SURFACE,
