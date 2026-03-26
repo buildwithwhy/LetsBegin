@@ -2,6 +2,7 @@ import {
   listAllPlans,
   getPlanById,
   updatePlan,
+  createPlan,
   type StoredPlan,
   type Task,
   type DagNode,
@@ -409,5 +410,119 @@ export async function getTaskPrompt(projectId: string, taskId: string) {
   return {
     prompt: lines.join("\n"),
     tool_suggestion: toolSuggestion,
+  };
+}
+
+// --- BYO Planning: let the user's own AI generate the plan ---
+
+export function getPlanningPrompt(brief: string) {
+  const today = new Date().toISOString().split("T")[0];
+
+  const prompt = `You are a project planning assistant. A user has given you this project brief:
+
+"${brief}"
+
+Generate a structured project plan as a JSON object matching this exact schema:
+
+{
+  "project_title": "string — short project title",
+  "summary": "string — 1-2 sentence summary",
+  "nodes": [
+    {
+      "id": "string — short slug like 'setup-account'",
+      "type": "task",
+      "title": "string",
+      "description": "string",
+      "assignee": "agent" | "user" | "hybrid",
+      "energy": "high" | "medium" | "low",
+      "status": "pending",
+      "depends_on": ["array of task ids this depends on"],
+      "agent_type": "builtin" | "claude-code" (optional, for agent/hybrid tasks),
+      "has_wait_after": true/false (optional),
+      "wait_type": "response" | "build" | "approval" | "processing" | "shipping" | "other" (optional),
+      "estimated_wait": "minutes" | "hours" | "days" | "weeks" (optional),
+      "deadline": "ISO date string" (optional),
+      "category": "coding" | "writing" | "emails" | "research" | "errands" | "calls" | "planning" | "review" (optional)
+    }
+    // OR for parallel tasks:
+    {
+      "id": "string",
+      "type": "parallel_group",
+      "children": [array of task objects],
+      "status": "pending",
+      "depends_on": ["array of task ids"]
+    }
+  ]
+}
+
+Rules:
+- assignee: "agent" (AI can fully automate), "user" (human must do it), "hybrid" (agent drafts, human reviews)
+- agent_type: "claude-code" for coding/implementation tasks, "builtin" for simpler drafting/research
+- Use parallel_group for tasks that can run simultaneously
+- depends_on means "this task LITERALLY CANNOT START without the OUTPUT of that task"
+- Most agent and user tasks should be INDEPENDENT and run in parallel
+- Tag tasks with has_wait_after/wait_type/estimated_wait when completion triggers a wait
+- If deadlines are mentioned, use ISO dates. Today is ${today}.
+- Generate 6-12 top-level tasks. No circular dependencies.
+
+Return ONLY the JSON object, no markdown fences, no explanation.`;
+
+  return {
+    prompt,
+    instructions: "Copy this prompt into your AI tool (Claude Code, ChatGPT, etc.). It will generate a plan JSON. Then use the submit_plan tool to save it to LetsBegin.",
+    schema_hint: "The response should be a JSON object with project_title, summary, and nodes array.",
+  };
+}
+
+export async function submitPlan(
+  brief: string,
+  planJson: {
+    project_title: string;
+    summary: string;
+    nodes: DagNode[];
+  },
+  userId?: string
+) {
+  // Validate basic structure
+  if (!planJson.project_title || !planJson.summary || !Array.isArray(planJson.nodes)) {
+    throw new Error("Invalid plan structure. Need project_title, summary, and nodes array.");
+  }
+
+  if (planJson.nodes.length === 0) {
+    throw new Error("Plan must have at least one task.");
+  }
+
+  // Validate each node has required fields
+  for (const node of planJson.nodes) {
+    if (node.type === "task") {
+      if (!node.id || !node.title || !node.description) {
+        throw new Error(`Task missing required fields (id, title, description): ${JSON.stringify(node).slice(0, 100)}`);
+      }
+    } else if (node.type === "parallel_group") {
+      if (!node.children || node.children.length === 0) {
+        throw new Error(`Parallel group ${node.id} has no children.`);
+      }
+    }
+  }
+
+  // Use a default user_id if not provided (for personal/local use)
+  const effectiveUserId = userId || "mcp-user";
+
+  const stored = await createPlan(
+    effectiveUserId,
+    brief,
+    planJson.project_title,
+    planJson.summary,
+    planJson.nodes
+  );
+
+  const allTasks = getAllTasks(stored.nodes);
+
+  return {
+    success: true,
+    project_id: stored.id,
+    title: stored.project_title,
+    task_count: allTasks.length,
+    message: `Project "${stored.project_title}" created with ${allTasks.length} tasks. Open LetsBegin to start working on it.`,
   };
 }

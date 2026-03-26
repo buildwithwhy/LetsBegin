@@ -118,6 +118,31 @@ export async function getPlanById(id: string): Promise<StoredPlan | null> {
   return data as StoredPlan;
 }
 
+export async function createPlan(
+  userId: string,
+  brief: string,
+  projectTitle: string,
+  summary: string,
+  nodes: DagNode[]
+): Promise<StoredPlan> {
+  const { data, error } = await supabase()
+    .from("plans")
+    .insert({
+      user_id: userId,
+      brief,
+      project_title: projectTitle,
+      summary,
+      nodes,
+      done_ids: [],
+      done_subtask_ids: [],
+    })
+    .select()
+    .single();
+
+  if (error) throw new Error(`Failed to create plan: ${error.message}`);
+  return data as StoredPlan;
+}
+
 export async function updatePlan(
   id: string,
   updates: Partial<Pick<StoredPlan, "nodes" | "done_ids" | "done_subtask_ids">>
