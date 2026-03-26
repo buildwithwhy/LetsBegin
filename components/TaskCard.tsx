@@ -564,6 +564,70 @@ export function TaskCard({
         </div>
       )}
 
+      {/* File attachments */}
+      <div style={{ marginBottom: attachments.length > 0 ? 8 : 0 }}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          style={{ display: "none" }}
+          onChange={handleFileSelect}
+        />
+        {!isDone && !isLocked && (
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              background: "none",
+              border: "none",
+              padding: "2px 4px",
+              fontSize: 12,
+              color: TEXT_LIGHT,
+              cursor: "pointer",
+              fontFamily: "'DM Sans', sans-serif",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+            title="Attach a file"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+            </svg>
+            Attach
+          </button>
+        )}
+        {attachments.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+            {attachments.map((att, i) => (
+              <span
+                key={i}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "2px 8px",
+                  borderRadius: 5,
+                  background: `${BORDER}88`,
+                  fontSize: 11,
+                  color: "#787774",
+                  maxWidth: 180,
+                }}
+              >
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{att.name}</span>
+                {!isDone && !isLocked && (
+                  <span
+                    role="button"
+                    onClick={() => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                    style={{ cursor: "pointer", color: TEXT_LIGHT, fontWeight: 600, fontSize: 13, lineHeight: 1, flexShrink: 0 }}
+                  >
+                    &times;
+                  </span>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Break this down button */}
       {canDecompose && !decomposing && (
         <div style={{ marginBottom: 8 }}>
@@ -952,7 +1016,7 @@ export function TaskCard({
       )}
 
       {isPending && (task.assignee === "user" || task.assignee === "hybrid") && (
-        <TaskChat task={task} projectSummary={projectSummary} priorResults={priorResults} allTasks={allTasksList} doneIds={doneIds} currentNodes={currentNodes} />
+        <TaskChat task={task} projectSummary={projectSummary} priorResults={priorResults} allTasks={allTasksList} doneIds={doneIds} currentNodes={currentNodes} byoKeys={byoKeys} />
       )}
 
       {/* ─── Hybrid two-phase handoff ─── */}
