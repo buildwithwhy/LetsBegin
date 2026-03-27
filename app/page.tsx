@@ -18,6 +18,7 @@ import {
 import { useAgentExecutor } from "@/hooks/useAgentExecutor";
 import { useAuth } from "@/hooks/useAuth";
 import { usePlanStorage } from "@/hooks/usePlanStorage";
+import { useUserSettings } from "@/hooks/useUserSettings";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { templates, type ProjectTemplate } from "@/lib/templates";
 import {
@@ -34,6 +35,7 @@ import { WelcomeBack } from "@/components/WelcomeBack";
 export default function Home() {
   const { user, loading: authLoading, signInWithEmail, signUpWithEmail, signInWithGoogle, resetPassword, signOut, configured: authConfigured } = useAuth();
   const { savePlan, loadPlans, deletePlan } = usePlanStorage(user?.id);
+  const { settings: dbSettings, loading: settingsLoading, saveSettings, loaded: settingsLoaded } = useUserSettings(user?.id);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -194,32 +196,72 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, step]);
 
-  // Persist userTools to localStorage
+  // Sync DB settings → local state on initial load
+  useEffect(() => {
+    if (!settingsLoaded || !dbSettings) return;
+    setExecutionMode(dbSettings.execution_mode);
+    setUserTools(dbSettings.user_tools);
+    setHasOnboarded(dbSettings.has_onboarded);
+    setUserProfile(dbSettings.user_profile);
+    setGlobalFocusMode(dbSettings.focus_mode);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsLoaded, dbSettings]);
+
+  // One-time migration: localStorage → DB for existing users
+  useEffect(() => {
+    if (!user?.id || !settingsLoaded) return;
+    if (dbSettings) return; // Already has DB settings, no migration needed
+
+    const localTools = localStorage.getItem("letsbegin-user-tools");
+    const localMode = localStorage.getItem("letsbegin-execution-mode");
+    const localOnboarded = localStorage.getItem("letsbegin-onboarded");
+    const localProfile = localStorage.getItem("letsbegin-user-profile");
+    const localFocus = localStorage.getItem("letsbegin-focus-mode");
+
+    saveSettings({
+      execution_mode: (localMode as "api" | "byo") || "api",
+      user_tools: localTools ? JSON.parse(localTools) : { available: [] },
+      has_onboarded: localOnboarded === "true",
+      user_profile: localProfile ? JSON.parse(localProfile) : { mode: null, hasAiTools: false, setupMcp: false },
+      focus_mode: localFocus === "true",
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, settingsLoaded, dbSettings]);
+
+  // Persist userTools to localStorage + DB
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("letsbegin-user-tools", JSON.stringify(userTools));
+      if (user?.id) saveSettings({ user_tools: userTools });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userTools]);
 
-  // Persist executionMode to localStorage
+  // Persist executionMode to localStorage + DB
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("letsbegin-execution-mode", executionMode);
+      if (user?.id) saveSettings({ execution_mode: executionMode });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [executionMode]);
 
-  // Persist hasOnboarded to localStorage
+  // Persist hasOnboarded to localStorage + DB
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("letsbegin-onboarded", String(hasOnboarded));
+      if (user?.id) saveSettings({ has_onboarded: hasOnboarded });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasOnboarded]);
 
-  // Persist userProfile to localStorage
+  // Persist userProfile to localStorage + DB
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("letsbegin-user-profile", JSON.stringify(userProfile));
+      if (user?.id) saveSettings({ user_profile: userProfile });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userProfile]);
 
   // Apply profile-based defaults on mount or profile change
@@ -234,11 +276,13 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userProfile.mode]);
 
-  // Persist globalFocusMode to localStorage
+  // Persist globalFocusMode to localStorage + DB
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("letsbegin-focus-mode", String(globalFocusMode));
+      if (user?.id) saveSettings({ focus_mode: globalFocusMode });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalFocusMode]);
 
   // Compute cross-project recommended tasks for "Your Day"

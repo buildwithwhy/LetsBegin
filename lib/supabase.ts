@@ -38,3 +38,25 @@ export const supabaseConfigured = Boolean(supabaseUrl && supabaseKey);
 //
 // create policy "Users can delete own plans"
 //   on plans for delete using (auth.uid() = user_id);
+//
+// -- User settings (run in Supabase SQL Editor)
+// create table user_settings (
+//   id uuid default gen_random_uuid() primary key,
+//   user_id uuid references auth.users(id) on delete cascade not null unique,
+//   execution_mode text default 'api',
+//   user_tools jsonb default '{"available": []}',
+//   user_profile jsonb default '{"mode": null, "hasAiTools": false, "setupMcp": false}',
+//   has_onboarded boolean default false,
+//   focus_mode boolean default false,
+//   created_at timestamptz default now(),
+//   updated_at timestamptz default now()
+// );
+//
+// alter table user_settings enable row level security;
+//
+// create policy "Users can read own settings"
+//   on user_settings for select using (auth.uid() = user_id);
+// create policy "Users can insert own settings"
+//   on user_settings for insert with check (auth.uid() = user_id);
+// create policy "Users can update own settings"
+//   on user_settings for update using (auth.uid() = user_id);
