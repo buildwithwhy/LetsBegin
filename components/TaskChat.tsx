@@ -7,24 +7,47 @@ import type { Task, Subtask, DagNode } from "@/lib/dag";
 import { getAllTasks } from "@/lib/dag";
 import { SimpleMarkdown } from "@/components/SimpleMarkdown";
 
-const QUICK_PROMPTS = [
-  "Walk me through this step by step",
-  "What should I do first?",
-  "What's the best approach for this?",
-  "I'm stuck, help me think through this",
-];
+export interface DependencyOutput {
+  id: string;
+  title: string;
+  output: string;
+}
+
+function getQuickPrompts(dependencyOutputs?: DependencyOutput[]): string[] {
+  const prompts: string[] = [
+    "How should I approach this?",
+    "What do I need from the completed tasks?",
+    "Can you draft this for me?",
+    "I'm stuck — help me think through this",
+  ];
+  if (dependencyOutputs && dependencyOutputs.length > 0) {
+    // Add dependency-specific prompts
+    for (const dep of dependencyOutputs.slice(0, 2)) {
+      prompts.push(`Summarize what was done in "${dep.title}"`);
+    }
+  }
+  return prompts;
+}
 
 function buildSystemContext({
   task,
+  projectTitle,
+  projectBrief,
   projectSummary,
   priorResults,
+  dependencyContext,
+  siblingTasks,
   allTasks,
   doneIds,
   currentNodes,
 }: {
   task: Task;
+  projectTitle?: string;
+  projectBrief?: string;
   projectSummary: string;
   priorResults: PriorResult[];
+  dependencyContext?: DependencyOutput[];
+  siblingTasks?: Task[];
   allTasks?: Task[];
   doneIds?: Set<string>;
   currentNodes?: DagNode[];
@@ -33,23 +56,20 @@ function buildSystemContext({
 
   // Core persona
   parts.push(
-    `You are a helpful project assistant. The user is working on a specific task within a larger project. Help them think through the task, give advice, brainstorm approaches, or answer questions. Be concise and practical.`
+    `You are a helpful project assistant embedded in a task management tool. You already know everything about this project — never ask "what project is this for?" or request context the user has already provided. Be concise, conversational, and practical.`
   );
 
   parts.push(`\nHere's the full context:`);
 
-  // Project summary
-  if (projectSummary) {
-    parts.push(`\n## Project\n${projectSummary}`);
+  // Project info
+  if (projectTitle) {
+    parts.push(`\n## Project: ${projectTitle}`);
   }
-
-  // What's been done so far
-  if (priorResults && priorResults.length > 0) {
-    parts.push(`\n## What's been done so far`);
-    for (const r of priorResults) {
-      const truncated = r.output ? r.output.slice(0, 200) + (r.output.length > 200 ? "..." : "") : "(no output)";
-      parts.push(`- "${r.title}" (${r.assignee}): ${truncated}`);
-    }
+  if (projectBrief) {
+    parts.push(`Brief: ${projectBrief}`);
+  }
+  if (projectSummary && projectSummary !== projectBrief) {
+    parts.push(`Summary: ${projectSummary}`);
   }
 
   // Current task details
@@ -67,6 +87,33 @@ function buildSystemContext({
 
   if (task.notes) {
     parts.push(`\nUser's notes on this task: ${task.notes}`);
+  }
+
+  // What this task depends on (with outputs)
+  if (dependencyContext && dependencyContext.length > 0) {
+    parts.push(`\n## What this task depends on (upstream work)`);
+    for (const dep of dependencyContext) {
+      const truncated = dep.output ? dep.output.slice(0, 500) + (dep.output.length > 500 ? "..." : "") : "(completed, no output captured)";
+      parts.push(`- "${dep.title}": ${truncated}`);
+    }
+  }
+
+  // What's been done so far (completed tasks)
+  if (priorResults && priorResults.length > 0) {
+    parts.push(`\n## What's been done so far (${priorResults.length} completed tasks)`);
+    for (const r of priorResults) {
+      const truncated = r.output ? r.output.slice(0, 200) + (r.output.length > 200 ? "..." : "") : "(no output)";
+      parts.push(`- "${r.title}" (${r.assignee}): ${truncated}`);
+    }
+  }
+
+  // What's happening in parallel (sibling tasks)
+  if (siblingTasks && siblingTasks.length > 0) {
+    parts.push(`\n## What's happening in parallel`);
+    for (const t of siblingTasks) {
+      const status = doneIds?.has(t.id) ? "done" : t.status === "locked" ? "locked" : "in progress";
+      parts.push(`- "${t.title}" (${t.assignee}) — ${status}`);
+    }
   }
 
   // What tasks are pending/next
@@ -96,7 +143,7 @@ function buildSystemContext({
   }
 
   parts.push(
-    `\nBe conversational and helpful. Don't just suggest breaking down the task — engage with whatever the user is asking about. If they want to brainstorm, brainstorm. If they want strategy advice, give it. If they're stuck, help them get unstuck. Keep responses concise — use numbered steps when walking through a process.`
+    `\nIMPORTANT: You already have all the context. Reference specific completed tasks by name when relevant. Understand the dependency chain — if this task builds on prior work, weave that into your advice. Give advice that accounts for what's already been done. Be conversational and helpful. Don't just suggest breaking down the task — engage with whatever the user is asking about. If they want to brainstorm, brainstorm. If they want strategy advice, give it. If they're stuck, help them get unstuck. Keep responses concise — use numbered steps when walking through a process.`
   );
 
   return parts.join("\n");
@@ -104,16 +151,24 @@ function buildSystemContext({
 
 export function TaskChat({
   task,
+  projectTitle,
+  projectBrief,
   projectSummary,
   priorResults,
+  dependencyContext,
+  siblingTasks,
   allTasks,
   doneIds,
   currentNodes,
   byoKeys,
 }: {
   task: Task;
+  projectTitle?: string;
+  projectBrief?: string;
   projectSummary: string;
   priorResults: PriorResult[];
+  dependencyContext?: DependencyOutput[];
+  siblingTasks?: Task[];
   allTasks?: Task[];
   doneIds?: Set<string>;
   currentNodes?: DagNode[];
@@ -133,14 +188,30 @@ export function TaskChat({
     () =>
       buildSystemContext({
         task,
+        projectTitle,
+        projectBrief,
         projectSummary,
         priorResults,
+        dependencyContext,
+        siblingTasks,
         allTasks,
         doneIds,
         currentNodes,
       }),
-    [task, projectSummary, priorResults, allTasks, doneIds, currentNodes]
+    [task, projectTitle, projectBrief, projectSummary, priorResults, dependencyContext, siblingTasks, allTasks, doneIds, currentNodes]
   );
+
+  const contextSummary = useMemo(() => {
+    const completedCount = priorResults?.length || 0;
+    const depCount = dependencyContext?.length || 0;
+    const parts: string[] = [];
+    parts.push("your project");
+    if (completedCount > 0) parts.push(`${completedCount} completed task${completedCount !== 1 ? "s" : ""}`);
+    if (depCount > 0) parts.push(`${depCount} dependenc${depCount !== 1 ? "ies" : "y"}`);
+    return `I know about ${parts.join(", ")}. Just ask.`;
+  }, [priorResults, dependencyContext]);
+
+  const quickPrompts = useMemo(() => getQuickPrompts(dependencyContext), [dependencyContext]);
 
   const sendMessage = async (text: string) => {
     if (!text.trim() || streaming) return;
@@ -285,13 +356,28 @@ export function TaskChat({
           gap: 8,
         }}
       >
+        {/* Context loaded indicator */}
+        <div style={{
+          padding: "6px 10px",
+          background: "#E8F5E9",
+          borderRadius: 6,
+          fontSize: 11,
+          color: "#2E7D32",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}>
+          <span style={{ fontSize: 13 }}>&#x2713;</span>
+          <span>{contextSummary}</span>
+        </div>
+
         {messages.length === 0 && (
           <div style={{ padding: 8 }}>
             <div style={{ fontSize: 12, color: TEXT_LIGHT, textAlign: "center", marginBottom: 10 }}>
               Ask anything about this task, or try one of these:
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {QUICK_PROMPTS.map((prompt) => (
+              {quickPrompts.map((prompt) => (
                 <button
                   key={prompt}
                   onClick={() => sendMessage(prompt)}
