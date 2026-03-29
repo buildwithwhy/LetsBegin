@@ -918,12 +918,18 @@ export default function Home() {
     setClarifyError("");
     setQuestionIndex(0);
     setStep("clarify");
-    setByoJsonInput("");
-    setByoJsonError("");
+
+    // BYO mode without API keys: show message to add keys
+    const byokKey = getRelevantByoKey();
+    if (executionMode === "byo" && !byokKey) {
+      setByoClarifyActive(true);
+      setClarifyLoading(false);
+      setQuestions([]);
+      return;
+    }
 
     // BYO mode with BYOK key: call API directly with user's key
-    const byokKey = getRelevantByoKey();
-    if (executionMode === "byo" && userTools.available.length > 0 && byokKey) {
+    if (executionMode === "byo" && byokKey) {
       setByoClarifyActive(false);
       setByokDirectLoading(true);
       setClarifyLoading(true);
@@ -962,26 +968,6 @@ export default function Home() {
         setClarifyLoading(false);
         setByokDirectLoading(false);
       }
-      return;
-    }
-
-    // BYO mode: show prompt for user to copy to their AI
-    if (executionMode === "byo" && userTools.available.length > 0) {
-      const prompt = `I'm planning a project: "${brief}"
-
-Generate 3-5 clarifying questions to ask me before planning. For each question, provide:
-- An id (short slug)
-- The question text
-- Type: "yes_no", "choice", or "short"
-- Options array (for choice type only)
-
-Return as JSON: { "questions": [{ "id": "...", "question": "...", "type": "...", "options": [...] }] }`;
-      setByoClarifyPrompt(prompt);
-      setByoClarifyActive(true);
-      setClarifyLoading(false);
-      setQuestions([]);
-      setByoWaitingForResult(false);
-      setByoOpenedTool(null);
       return;
     }
 
