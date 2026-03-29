@@ -105,6 +105,17 @@ export default function Home() {
   const [focusCategory, setFocusCategory] = useState<TaskCategory | "all">("all");
   const [detourDismissed, setDetourDismissed] = useState(false);
 
+  // Brain Fry awareness state
+  const [aiInteractionCount, setAiInteractionCount] = useState(0);
+  const [showBrainFryOverlay, setShowBrainFryOverlay] = useState(false);
+  const [brainFryDismissed, setBrainFryDismissed] = useState(false);
+  const [sessionStartTime] = useState<number>(() => Date.now());
+  const [sessionBreakShown, setSessionBreakShown] = useState(false);
+  const [showSessionBreak, setShowSessionBreak] = useState(false);
+  const [lastSessionBreakAt, setLastSessionBreakAt] = useState<number | null>(null);
+  const [showBatchReview, setShowBatchReview] = useState(false);
+  const [brainFryPaused, setBrainFryPaused] = useState(false);
+
   // Quick Capture state
   const [quickCapture, setQuickCapture] = useState("");
   const [showProjectPicker, setShowProjectPicker] = useState(false);
@@ -291,6 +302,48 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalFocusMode]);
 
+  // Brain Fry: helper to track AI interactions
+  const trackAiInteraction = useCallback(() => {
+    setAiInteractionCount((prev) => {
+      const next = prev + 1;
+      if (next >= 21 && !brainFryDismissed) {
+        setShowBrainFryOverlay(true);
+      }
+      return next;
+    });
+  }, [brainFryDismissed]);
+
+  // Session break reminder: 90 min initial, then every 45 min
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const elapsedMs = now - sessionStartTime;
+      const NINETY_MIN = 90 * 60 * 1000;
+      const FORTY_FIVE_MIN = 45 * 60 * 1000;
+
+      if (!sessionBreakShown && elapsedMs >= NINETY_MIN) {
+        setShowSessionBreak(true);
+        setSessionBreakShown(true);
+        setLastSessionBreakAt(now);
+      } else if (sessionBreakShown && lastSessionBreakAt) {
+        const sinceLast = now - lastSessionBreakAt;
+        if (sinceLast >= FORTY_FIVE_MIN) {
+          setShowSessionBreak(true);
+          setLastSessionBreakAt(now);
+        }
+      }
+    }, 30000); // check every 30s
+    return () => clearInterval(interval);
+  }, [sessionStartTime, sessionBreakShown, lastSessionBreakAt]);
+
+  // Brain Fry score helper
+  const brainFryLevel = useMemo(() => {
+    if (aiInteractionCount <= 5) return { label: "Fresh \uD83E\uDDE0", color: "#2DA44E", bg: "#2DA44E14" };
+    if (aiInteractionCount <= 12) return { label: "Warming up", color: "#D4A72C", bg: "#D4A72C14" };
+    if (aiInteractionCount <= 20) return { label: "Getting hot", color: "#E8590C", bg: "#E8590C14" };
+    return { label: "Brain fry alert \u2014 take a break", color: "#CF222E", bg: "#CF222E14" };
+  }, [aiInteractionCount]);
+
   // Compute cross-project recommended tasks for "Your Day"
   const yourDayTasks = useMemo(() => {
     if (savedPlans.length === 0) return [];
@@ -334,6 +387,20 @@ export default function Home() {
       // Energy filter: bump matching tasks
       if (dayEnergy && a.task.energy === dayEnergy) aBonus += 15;
       if (dayEnergy && b.task.energy === dayEnergy) bBonus += 15;
+
+      // Low-Brain Mode: strongly prefer easy, no-AI, review-type tasks
+      if (dayEnergy === "low") {
+        if (a.task.assignee === "user") aBonus += 25;
+        if (b.task.assignee === "user") bBonus += 25;
+        if (a.task.energy === "low") aBonus += 20;
+        if (b.task.energy === "low") bBonus += 20;
+        if (a.task.title.toLowerCase().includes("review")) aBonus += 15;
+        if (b.task.title.toLowerCase().includes("review")) bBonus += 15;
+        const aSubCount = a.task.subtasks?.length || 0;
+        const bSubCount = b.task.subtasks?.length || 0;
+        if (aSubCount <= 2) aBonus += 10;
+        if (bSubCount <= 2) bBonus += 10;
+      }
 
       return (b.score + bBonus) - (a.score + aBonus);
     });
@@ -770,6 +837,7 @@ export default function Home() {
         // Stagger launches slightly to avoid hammering the API
         const agentType = task.agent_type;
         setTimeout(() => {
+          trackAiInteraction();
           execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee, false, agentType);
         }, launchedAgentTasks.current.size * 500);
       }
@@ -794,12 +862,14 @@ export default function Home() {
         ),
       };
     });
+    trackAiInteraction();
     execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee, force, task.agent_type);
   };
 
   const handleDecompose = useCallback(async (taskId: string, granularity: "normal" | "detailed" | "tiny") => {
     const task = allTasks.find((t) => t.id === taskId);
     if (!task || !plan) return;
+    trackAiInteraction();
 
     const res = await fetch("/api/decompose", {
       method: "POST",
@@ -886,6 +956,7 @@ export default function Home() {
       setByoClarifyActive(false);
       setByokDirectLoading(true);
       setClarifyLoading(true);
+      trackAiInteraction();
       try {
         const res = await fetch("/api/clarify", {
           method: "POST",
@@ -927,6 +998,7 @@ export default function Home() {
     // API mode: call our API
     setByoClarifyActive(false);
     setClarifyLoading(true);
+    trackAiInteraction();
     try {
       const res = await fetch("/api/clarify", {
         method: "POST",
@@ -995,6 +1067,7 @@ export default function Home() {
     setByoClarifyActive(false);
     setClarifyLoading(true);
     setClarifyError("");
+    trackAiInteraction();
     try {
       const res = await fetch("/api/clarify", {
         method: "POST",
@@ -1107,6 +1180,7 @@ export default function Home() {
     setThinkingText("");
     setCompileStatus("Thinking through your brief...");
     setElapsed(0);
+    trackAiInteraction();
 
     const enrichedBrief = buildEnrichedBrief();
 
@@ -1229,6 +1303,7 @@ export default function Home() {
       setByoPlanActive(false);
       setByokDirectLoading(true);
       setCompileStartTime(Date.now());
+      trackAiInteraction();
 
       try {
         const res = await fetch("/api/compile", {
@@ -1333,6 +1408,7 @@ export default function Home() {
     // API mode
     setByoPlanActive(false);
     setCompileStartTime(Date.now());
+    trackAiInteraction();
 
     try {
       const res = await fetch("/api/compile", {
@@ -1437,6 +1513,69 @@ export default function Home() {
         {/* ─── DASHBOARD ─── */}
         {(user || !authConfigured) && step === "dashboard" && (
           <div>
+            {/* ─── BRAIN FRY INDICATOR ─── */}
+            {aiInteractionCount > 0 && (
+              <div style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "4px 12px",
+                borderRadius: 16,
+                background: brainFryLevel.bg,
+                border: `1px solid ${brainFryLevel.color}30`,
+                fontSize: 12,
+                fontWeight: 600,
+                color: brainFryLevel.color,
+                marginBottom: 12,
+              }}>
+                <span style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  background: brainFryLevel.color,
+                  display: "inline-block",
+                }} />
+                {brainFryLevel.label}
+                <span style={{ fontSize: 10, opacity: 0.7 }}>({aiInteractionCount} AI calls)</span>
+              </div>
+            )}
+
+            {/* ─── SESSION BREAK REMINDER ─── */}
+            {showSessionBreak && (
+              <div style={{
+                padding: "12px 16px",
+                borderRadius: 10,
+                background: "#6E57E00a",
+                border: "1px solid #6E57E025",
+                marginBottom: 16,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#6E57E0" }}>
+                    You&apos;ve been going for a while. Quick stretch?
+                  </div>
+                  <div style={{ fontSize: 12, color: TEXT_LIGHT }}>
+                    Stepping away for a few minutes helps you stay sharp.
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowSessionBreak(false)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: TEXT_LIGHT,
+                    fontSize: 18,
+                    cursor: "pointer",
+                    padding: "0 4px",
+                  }}
+                >
+                  &times;
+                </button>
+              </div>
+            )}
+
             {/* ─── QUICK CAPTURE ─── */}
             {savedPlans.length > 0 && (
               <div style={{ marginBottom: 20, position: "relative" }}>
@@ -1539,6 +1678,19 @@ export default function Home() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <h2 style={{ fontSize: 22, fontWeight: 700, color: TEXT, margin: 0 }}>Your Day</h2>
+                    {dayEnergy === "low" && (
+                      <span style={{
+                        padding: "3px 10px",
+                        borderRadius: 12,
+                        background: "#2DA44E14",
+                        border: "1px solid #2DA44E30",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "#2DA44E",
+                      }}>
+                        Low brain mode
+                      </span>
+                    )}
                     <button
                       onClick={() => setShowCatchUp(true)}
                       style={{
@@ -1681,6 +1833,22 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
+
+                {/* Low-Brain Mode copy */}
+                {dayEnergy === "low" && yourDayTasks.length > 0 && (
+                  <div style={{
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    background: "#2DA44E08",
+                    border: "1px solid #2DA44E20",
+                    fontSize: 13,
+                    color: "#2DA44E",
+                    marginBottom: 12,
+                    fontWeight: 500,
+                  }}>
+                    Low energy? Here are tasks you can knock out without heavy thinking
+                  </div>
+                )}
 
                 {/* Low-Brain Mode copy */}
                 {dayEnergy === "low" && yourDayTasks.length > 0 && (
@@ -3870,6 +4038,69 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* Brain Fry indicator + Batch Review button */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                  {aiInteractionCount > 0 && (
+                    <span style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      padding: "3px 10px",
+                      borderRadius: 12,
+                      background: brainFryLevel.bg,
+                      border: `1px solid ${brainFryLevel.color}30`,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: brainFryLevel.color,
+                    }}>
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: brainFryLevel.color }} />
+                      {brainFryLevel.label}
+                    </span>
+                  )}
+                  {allTasks.filter((t) => t.assignee === "agent" && doneIds.has(t.id)).length >= 2 && (
+                    <button
+                      onClick={() => setShowBatchReview(true)}
+                      style={{
+                        padding: "3px 12px",
+                        borderRadius: 12,
+                        border: `1px solid ${PRIMARY}40`,
+                        background: `${PRIMARY}08`,
+                        color: PRIMARY,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      Review all ({allTasks.filter((t) => t.assignee === "agent" && doneIds.has(t.id)).length} AI tasks)
+                    </button>
+                  )}
+                </div>
+
+                {/* Session break reminder */}
+                {showSessionBreak && (
+                  <div style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    background: "#6E57E00a",
+                    border: "1px solid #6E57E025",
+                    marginBottom: 12,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}>
+                    <div style={{ fontSize: 12, color: "#6E57E0", fontWeight: 500 }}>
+                      You&apos;ve been going for a while. Quick stretch?
+                    </div>
+                    <button
+                      onClick={() => setShowSessionBreak(false)}
+                      style={{ background: "none", border: "none", color: TEXT_LIGHT, fontSize: 16, cursor: "pointer", padding: "0 4px" }}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                )}
+
                 {/* Progress bar with streak dots */}
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
                   <div
@@ -4816,6 +5047,219 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* ─── BRAIN FRY OVERLAY ─── */}
+      {showBrainFryOverlay && (
+        <div style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.5)",
+          zIndex: 2000,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}>
+          <div style={{
+            background: "#fff",
+            borderRadius: 16,
+            padding: "32px 28px",
+            maxWidth: 400,
+            width: "90%",
+            textAlign: "center",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+          }}>
+            {brainFryPaused ? (
+              <>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>&#x1F33F;</div>
+                <h3 style={{ fontSize: 20, fontWeight: 700, color: TEXT, margin: "0 0 8px 0" }}>
+                  Taking a break
+                </h3>
+                <p style={{ fontSize: 14, color: TEXT_LIGHT, lineHeight: 1.6, marginBottom: 20 }}>
+                  All timers paused. Close your eyes, stretch, grab water. Your work will be here when you get back.
+                </p>
+                <button
+                  onClick={() => {
+                    setBrainFryPaused(false);
+                    setShowBrainFryOverlay(false);
+                    setBrainFryDismissed(true);
+                  }}
+                  style={{
+                    padding: "10px 24px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: PRIMARY,
+                    color: "#fff",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  I&apos;m back
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>&#x1F9E0;</div>
+                <h3 style={{ fontSize: 20, fontWeight: 700, color: "#CF222E", margin: "0 0 8px 0" }}>
+                  Brain fry alert
+                </h3>
+                <p style={{ fontSize: 14, color: TEXT_LIGHT, lineHeight: 1.6, marginBottom: 8 }}>
+                  You&apos;ve had {aiInteractionCount} AI interactions this session. Research shows that heavy AI supervision leads to cognitive overload and more errors.
+                </p>
+                <p style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 20 }}>
+                  A 5-minute break can help you reset.
+                </p>
+                <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+                  <button
+                    onClick={() => setBrainFryPaused(true)}
+                    style={{
+                      padding: "10px 24px",
+                      borderRadius: 10,
+                      border: "none",
+                      background: "#2DA44E",
+                      color: "#fff",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    Take a break
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowBrainFryOverlay(false);
+                      setBrainFryDismissed(true);
+                    }}
+                    style={{
+                      padding: "10px 24px",
+                      borderRadius: 10,
+                      border: `1px solid ${BORDER}`,
+                      background: "transparent",
+                      color: TEXT_LIGHT,
+                      fontSize: 14,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    I&apos;m fine
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── BATCH REVIEW OVERLAY ─── */}
+      {showBatchReview && plan && (() => {
+        const completedAgentTasks = allTasks.filter(
+          (t) => t.assignee === "agent" && doneIds.has(t.id)
+        );
+        return (
+          <div style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            zIndex: 2000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            overflow: "auto",
+          }}>
+            <div style={{
+              background: "#fff",
+              borderRadius: 16,
+              padding: "28px 24px",
+              maxWidth: 560,
+              width: "90%",
+              maxHeight: "80vh",
+              overflow: "auto",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+            }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, color: TEXT, margin: "0 0 4px 0" }}>
+                Batch review
+              </h3>
+              <p style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 16 }}>
+                {completedAgentTasks.length} AI tasks completed. Review them all at once to reduce oversight burden.
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+                {completedAgentTasks.map((t) => {
+                  const result = results[t.id];
+                  const output = taskOutputs[t.id] || result?.finalOutput || result?.steps
+                    ?.filter((s) => s.type === "output")
+                    .map((s) => s.type === "output" ? s.content : "")
+                    .join("\n") || t.notes || "";
+                  return (
+                    <div key={t.id} style={{
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      background: SURFACE,
+                      border: `1px solid ${BORDER}`,
+                    }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 4 }}>
+                        {t.title}
+                      </div>
+                      {output && (
+                        <div style={{
+                          fontSize: 12,
+                          color: TEXT_LIGHT,
+                          lineHeight: 1.5,
+                          whiteSpace: "pre-wrap",
+                          maxHeight: 80,
+                          overflow: "hidden",
+                          background: "#F7F6F3",
+                          padding: "8px 10px",
+                          borderRadius: 6,
+                        }}>
+                          {output.slice(0, 300)}
+                          {output.length > 300 ? "..." : ""}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button
+                  onClick={() => setShowBatchReview(false)}
+                  style={{
+                    padding: "10px 20px",
+                    borderRadius: 10,
+                    border: `1px solid ${BORDER}`,
+                    background: "transparent",
+                    color: TEXT,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  Review individually
+                </button>
+                <button
+                  onClick={() => setShowBatchReview(false)}
+                  style={{
+                    padding: "10px 20px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: "#2DA44E",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  Approve all
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Undo toast */}
       {undoToast && (
