@@ -1682,6 +1682,22 @@ export default function Home() {
                   </div>
                 </div>
 
+                {/* Low-Brain Mode copy */}
+                {dayEnergy === "low" && yourDayTasks.length > 0 && (
+                  <div style={{
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    background: "#2DA44E08",
+                    border: "1px solid #2DA44E20",
+                    fontSize: 13,
+                    color: "#2DA44E",
+                    marginBottom: 12,
+                    fontWeight: 500,
+                  }}>
+                    Low energy? Here are tasks you can knock out without heavy thinking
+                  </div>
+                )}
+
                 {/* Recommended tasks */}
                 {yourDayTasks.length > 0 ? (
                   globalFocusMode ? (
@@ -2080,28 +2096,25 @@ export default function Home() {
             {/* Hero */}
             <div style={{ textAlign: "center", marginBottom: 40, paddingTop: 20 }}>
               <h1 style={{ fontSize: 40, fontWeight: 800, color: TEXT, margin: "0 0 12px 0", lineHeight: 1.15 }}>
-                Describe it. Plan it.<br />Get it done.
+                Your AI tools are frying<br />your brain. We fix that.
               </h1>
-              <p style={{ fontSize: 17, color: TEXT_LIGHT, lineHeight: 1.6, maxWidth: 520, margin: "0 auto 24px" }}>
-                LetsBegin turns any goal into a smart project plan. AI handles what it can.
-                You handle what matters. Bring your own tools &mdash; no extra API costs.
+              <p style={{ fontSize: 17, color: TEXT_LIGHT, lineHeight: 1.6, maxWidth: 540, margin: "0 auto 24px" }}>
+                A 2026 BCG study found workers using 4+ AI tools make 39% more major errors.
+                LetsBegin replaces the chaos with one calm workflow &mdash; plan, execute, and review in a single place.
               </p>
             </div>
 
-            {/* Feature grid */}
+            {/* Value props */}
             <div style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
               gap: 14,
-              marginBottom: 40,
+              marginBottom: 32,
             }}>
               {[
-                { icon: "\uD83D\uDCAC", title: "Plain language in", desc: "Describe what you want to accomplish. We\u2019ll ask smart follow-up questions, then build a dependency graph of tasks." },
-                { icon: "\uD83E\uDDE0", title: "Bring your own AI", desc: "Have Claude Code, ChatGPT, or Gemini? Use them. We route each task to the best tool you already pay for." },
-                { icon: "\uD83C\uDFAF", title: "One thing at a time", desc: "Smart scheduling picks your next task based on deadlines, wait times, what it unblocks, and your energy level." },
-                { icon: "\u26A1", title: "Agents work for you", desc: "Coding, research, drafting \u2014 AI agents handle their tasks automatically or give you a ready-to-paste prompt." },
-                { icon: "\uD83D\uDCC5", title: "Deadline-aware", desc: "Set deadlines and the scheduler adjusts \u2014 factoring in wait times so you start things early enough." },
-                { icon: "\uD83D\uDDA4", title: "ADHD-friendly", desc: "Break any task into tiny steps, focus on one thing, get welcome-back recaps, and track streaks." },
+                { icon: "\uD83C\uDFAF", title: "One tool, not six", desc: "Plan, execute, and review in one place. No more tab circus. No more copy-pasting between ChatGPT, Notion, Jira, and Slack." },
+                { icon: "\uD83E\uDDE0", title: "AI does the work, you review the results", desc: "Batch review mode means less oversight, less context-switching, less brain fry. You stay in control without babysitting." },
+                { icon: "\u26A1", title: "Built for how your brain actually works", desc: "Energy-aware task routing. ADHD-friendly focus mode. Break reminders. Your pace, not the AI\u2019s." },
               ].map((f) => (
                 <div key={f.title} style={{
                   padding: "16px",
@@ -2116,28 +2129,19 @@ export default function Home() {
               ))}
             </div>
 
-            {/* How it works */}
-            <div style={{ textAlign: "center", marginBottom: 40 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: TEXT, marginBottom: 16 }}>How it works</h2>
-              <div style={{ display: "flex", justifyContent: "center", gap: 32, flexWrap: "wrap" }}>
-                {[
-                  { step: "1", label: "Describe your project" },
-                  { step: "2", label: "Answer a few questions" },
-                  { step: "3", label: "Get your smart plan" },
-                  { step: "4", label: "Do one thing at a time" },
-                ].map((s) => (
-                  <div key={s.step} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{
-                      width: 28, height: 28, borderRadius: "50%",
-                      background: PRIMARY, color: "#fff",
-                      fontSize: 13, fontWeight: 700,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      flexShrink: 0,
-                    }}>{s.step}</span>
-                    <span style={{ fontSize: 13, color: TEXT, fontWeight: 500 }}>{s.label}</span>
-                  </div>
-                ))}
-              </div>
+            {/* Social proof / credibility */}
+            <div style={{
+              textAlign: "center",
+              marginBottom: 40,
+              padding: "16px 20px",
+              borderRadius: 12,
+              background: SURFACE,
+              border: `1px solid ${BORDER}`,
+            }}>
+              <p style={{ fontSize: 13, color: TEXT_LIGHT, margin: 0, lineHeight: 1.7 }}>
+                Works with Claude, GPT, Gemini &mdash; or bring your own API key.<br />
+                Open protocol: compatible with OpenClaw, MCP, and more.
+              </p>
             </div>
 
             {/* Auth form */}
@@ -2300,7 +2304,7 @@ export default function Home() {
             </div>
 
             <p style={{ textAlign: "center", fontSize: 11, color: "#B0AFA8", marginTop: 24 }}>
-              Free to use. Bring your own AI tools to save on API costs.
+              Free to use. One tool to replace the chaos &mdash; zero brain fry.
             </p>
           </div>
         )}
