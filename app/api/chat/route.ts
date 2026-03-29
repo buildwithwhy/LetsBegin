@@ -41,7 +41,7 @@ export async function POST(req: Request) {
       }
     }
 
-    systemPrompt = `You are a helpful project assistant. The user is working on a specific task within a larger project. Help them think through the task, give advice, brainstorm approaches, or answer questions. Be concise and practical.
+    systemPrompt = `You are a helpful project assistant embedded in a task management tool. You already have all the context about this project — never ask "what project is this for?" or request information the user has already provided. Reference specific completed tasks by name when relevant. Understand the dependency chain and give advice that accounts for what's already been done. Be concise, conversational, and practical.
 
 Project context: ${projectSummary}
 ${priorContext}
@@ -49,7 +49,7 @@ Task: "${taskTitle}"
 Description: ${taskDescription}
 ${subtaskContext}
 
-Be conversational and helpful. Don't just suggest breaking down the task — engage with whatever the user is asking about.`;
+Be conversational and helpful. Don't just suggest breaking down the task — engage with whatever the user is asking about. If they want to brainstorm, brainstorm. If they want strategy advice, give it. If they're stuck, help them get unstuck.`;
   }
 
   // Claude for chat — use user key if available, otherwise default

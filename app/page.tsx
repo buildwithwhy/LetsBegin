@@ -64,6 +64,7 @@ export default function Home() {
   const [elapsed, setElapsed] = useState(0);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
+  const [taskOutputs, setTaskOutputs] = useState<Record<string, string>>({});
   const [energyFilter, setEnergyFilter] = useState<Energy | "all">("all");
   const [assigneeFilter, setAssigneeFilter] = useState<Assignee | "all">("all");
   const [doneSubtaskIds, setDoneSubtaskIds] = useState<Set<string>>(new Set());
@@ -103,6 +104,14 @@ export default function Home() {
   const [projectPriority, setProjectPriority] = useState<ProjectPriority>("medium");
   const [focusCategory, setFocusCategory] = useState<TaskCategory | "all">("all");
   const [detourDismissed, setDetourDismissed] = useState(false);
+
+  // Quick Capture state
+  const [quickCapture, setQuickCapture] = useState("");
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [quickCaptureToast, setQuickCaptureToast] = useState<string | null>(null);
+
+  // Catch-up panel state
+  const [showCatchUp, setShowCatchUp] = useState(false);
 
   // Onboarding state
   const [hasOnboarded, setHasOnboarded] = useState<boolean>(() => {
@@ -344,6 +353,15 @@ export default function Home() {
     });
     setDoneIds(new Set(saved.done_ids));
     setDoneSubtaskIds(new Set(saved.done_subtask_ids));
+    // Rebuild taskOutputs from saved task notes
+    const rebuiltOutputs: Record<string, string> = {};
+    const rebuildTasks = getAllTasks(saved.nodes);
+    for (const t of rebuildTasks) {
+      if (saved.done_ids.includes(t.id) && t.notes) {
+        rebuiltOutputs[t.id] = t.notes;
+      }
+    }
+    setTaskOutputs(rebuiltOutputs);
     setSavedPlanId(saved.id);
     setProjectPriority(saved.priority || "medium");
     setFocusCategory("all");
@@ -376,6 +394,7 @@ export default function Home() {
     setBrief("");
     setPlan(null);
     setDoneIds(new Set());
+    setTaskOutputs({});
     setDoneSubtaskIds(new Set());
     setSavedPlanId(null);
     setJustMeMode(false);
@@ -392,6 +411,41 @@ export default function Home() {
     setStep("dashboard");
   }, []);
 
+  // Quick Capture: add a thought as a task to a project
+  const addQuickCapture = useCallback(async (projectId: string) => {
+    const sp = savedPlans.find((p) => p.id === projectId);
+    if (!sp || !quickCapture.trim()) return;
+
+    const newTask: Task = {
+      id: `quick-${Date.now()}`,
+      type: "task",
+      title: quickCapture.trim(),
+      description: "",
+      assignee: "user",
+      energy: "low",
+      status: "pending",
+      depends_on: [],
+    };
+
+    const updatedNodes: DagNode[] = [...sp.nodes, newTask];
+    const updatedPlan: Plan = {
+      project_title: sp.project_title,
+      summary: sp.summary,
+      nodes: updatedNodes,
+    };
+
+    await savePlan(sp.brief, updatedPlan, new Set(sp.done_ids || []), new Set(sp.done_subtask_ids || []), sp.priority || "medium");
+
+    // Reload plans to reflect changes
+    const plans = await loadPlans();
+    setSavedPlans(plans);
+
+    setQuickCapture("");
+    setShowProjectPicker(false);
+    setQuickCaptureToast(sp.project_title || "Untitled");
+    setTimeout(() => setQuickCaptureToast(null), 3000);
+  }, [savedPlans, quickCapture, savePlan, loadPlans]);
+
   // Elapsed timer for compiling phase
   useEffect(() => {
     if (compileStartTime === null) return;
@@ -406,6 +460,38 @@ export default function Home() {
   const doneCount = allTasks.filter((t) => doneIds.has(t.id)).length;
 
   const currentNodes = plan ? computeUnlocked(plan.nodes, doneIds) : [];
+
+  // Helper: compute dependency outputs for a task
+  const getDependencyOutputs = useCallback((task: Task) => {
+    if (!task.depends_on || task.depends_on.length === 0) return [];
+    return task.depends_on
+      .filter((depId) => {
+        const depTask = allTasks.find((t) => t.id === depId);
+        return depTask && (taskOutputs[depId] || depTask?.notes);
+      })
+      .map((depId) => {
+        const depTask = allTasks.find((t) => t.id === depId)!;
+        return {
+          id: depId,
+          title: depTask.title,
+          output: taskOutputs[depId] || depTask.notes || "",
+        };
+      });
+  }, [allTasks, taskOutputs]);
+
+  // Helper: get sibling tasks (other tasks at the same level in a parallel group)
+  const getSiblingTasks = useCallback((task: Task): Task[] => {
+    if (!plan) return [];
+    for (const node of plan.nodes) {
+      if (node.type === "parallel_group") {
+        const isChild = node.children.some((c) => c.id === task.id);
+        if (isChild) {
+          return node.children.filter((c) => c.id !== task.id);
+        }
+      }
+    }
+    return [];
+  }, [plan]);
 
   // Welcome-back recap data
   const welcomeBackData = useMemo(() => {
@@ -476,6 +562,10 @@ export default function Home() {
         next.add(id);
         return next;
       });
+      // Store task output/notes for context carry-forward
+      if (notes) {
+        setTaskOutputs((prev) => ({ ...prev, [id]: notes }));
+      }
       // Update plan with completion timestamp, notes, and activity
       setPlan((prev) => {
         if (!prev) return prev;
@@ -615,12 +705,20 @@ export default function Home() {
   // Track which agent tasks we've already kicked off
   const launchedAgentTasks = useRef<Set<string>>(new Set());
 
-  // Auto-complete agent tasks when result is done
+  // Auto-complete agent tasks when result is done and capture their output
   useEffect(() => {
     for (const [taskId, result] of Object.entries(results)) {
       if (result.done && !result.error) {
         const task = allTasks.find((t) => t.id === taskId);
         if (task && task.assignee === "agent" && !doneIds.has(taskId)) {
+          // Capture agent output for context carry-forward
+          const agentOutput = result.finalOutput || result.steps
+            ?.filter((s) => s.type === "output")
+            .map((s) => s.type === "output" ? s.content : "")
+            .join("\n") || "";
+          if (agentOutput) {
+            setTaskOutputs((prev) => ({ ...prev, [taskId]: agentOutput }));
+          }
           markDone(taskId);
         }
       }
@@ -1484,12 +1582,128 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
         {/* ─── DASHBOARD ─── */}
         {(user || !authConfigured) && step === "dashboard" && (
           <div>
+            {/* ─── QUICK CAPTURE ─── */}
+            {savedPlans.length > 0 && (
+              <div style={{ marginBottom: 20, position: "relative" }}>
+                <input
+                  type="text"
+                  value={quickCapture}
+                  onChange={(e) => {
+                    setQuickCapture(e.target.value);
+                    if (showProjectPicker) setShowProjectPicker(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && quickCapture.trim()) {
+                      if (savedPlans.length === 1) {
+                        addQuickCapture(savedPlans[0].id);
+                      } else {
+                        setShowProjectPicker(true);
+                      }
+                    }
+                    if (e.key === "Escape") {
+                      setShowProjectPicker(false);
+                      setQuickCapture("");
+                    }
+                  }}
+                  placeholder="Quick thought — what's on your mind?"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: `1px solid ${BORDER}`,
+                    background: SURFACE,
+                    color: TEXT,
+                    fontSize: 14,
+                    fontFamily: FONT,
+                    outline: "none",
+                    boxSizing: "border-box",
+                    transition: "border-color 0.15s",
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = `${PRIMARY}80`)}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = BORDER;
+                    // Delay hiding picker to allow click
+                    setTimeout(() => {
+                      if (showProjectPicker) setShowProjectPicker(false);
+                    }, 200);
+                  }}
+                />
+                {showProjectPicker && savedPlans.length > 1 && (
+                  <div style={{
+                    position: "absolute",
+                    top: "100%",
+                    left: 0,
+                    right: 0,
+                    marginTop: 4,
+                    background: SURFACE,
+                    border: `1px solid ${BORDER}`,
+                    borderRadius: 8,
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                    zIndex: 50,
+                    overflow: "hidden",
+                  }}>
+                    <div style={{ padding: "8px 12px", fontSize: 11, fontWeight: 600, color: TEXT_LIGHT, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                      Add to project
+                    </div>
+                    {savedPlans.map((sp) => (
+                      <button
+                        key={sp.id}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          addQuickCapture(sp.id);
+                        }}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          padding: "8px 12px",
+                          background: "none",
+                          border: "none",
+                          textAlign: "left",
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: TEXT,
+                          cursor: "pointer",
+                          fontFamily: FONT,
+                          transition: "background 0.1s",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = `${PRIMARY}08`)}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                      >
+                        {sp.project_title || "Untitled project"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ─── YOUR DAY ─── */}
             {savedPlans.length > 0 && (
               <div style={{ marginBottom: 32 }}>
-                {/* Focus mode toggle */}
+                {/* Focus mode toggle + Catch me up */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                  <h2 style={{ fontSize: 22, fontWeight: 700, color: TEXT, margin: 0 }}>Your Day</h2>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <h2 style={{ fontSize: 22, fontWeight: 700, color: TEXT, margin: 0 }}>Your Day</h2>
+                    <button
+                      onClick={() => setShowCatchUp(true)}
+                      style={{
+                        padding: "4px 12px",
+                        borderRadius: 16,
+                        border: `1px solid ${BORDER}`,
+                        background: SURFACE,
+                        color: TEXT_LIGHT,
+                        fontSize: 12,
+                        fontWeight: 500,
+                        cursor: "pointer",
+                        fontFamily: FONT,
+                        transition: "all 0.15s",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = PRIMARY; e.currentTarget.style.color = PRIMARY; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.color = TEXT_LIGHT; }}
+                    >
+                      Catch me up
+                    </button>
+                  </div>
                   <button
                     onClick={() => setGlobalFocusMode(!globalFocusMode)}
                     style={{
@@ -4525,19 +4739,23 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                       onRunAgent={handleRunAgent}
                       onAddNote={addNote}
                       projectSummary={plan?.summary || brief}
+                      projectTitle={plan?.project_title}
+                      projectBrief={brief}
                       autoExpandSubtasks
                       doneSubtaskIds={doneSubtaskIds}
                       onToggleSubtask={toggleSubtask}
                       priorResults={allTasks
-                        .filter((t) => results[t.id]?.done)
+                        .filter((t) => results[t.id]?.done || doneIds.has(t.id))
                         .map((t) => ({
                           title: t.title,
                           assignee: t.assignee,
-                          output: results[t.id]?.finalOutput || results[t.id]?.steps
+                          output: taskOutputs[t.id] || results[t.id]?.finalOutput || results[t.id]?.steps
                             ?.filter((s) => s.type === "output")
                             .map((s) => s.type === "output" ? s.content : "")
-                            .join("\n") || "",
+                            .join("\n") || t.notes || "",
                         }))}
+                      dependencyOutputs={getDependencyOutputs(oneThingTask)}
+                      siblingTasks={getSiblingTasks(oneThingTask)}
                       allTasksList={allTasks}
                       executionMode={executionMode}
                       userTools={userTools}
@@ -5183,9 +5401,12 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                   onRunAgent={handleRunAgent}
                   onAddNote={addNote}
                   projectSummary={plan?.summary || brief}
+                  projectTitle={plan?.project_title}
+                  projectBrief={brief}
                   doneSubtaskIds={doneSubtaskIds}
                   onToggleSubtask={toggleSubtask}
                   allTasks={allTasks}
+                  taskOutputs={taskOutputs}
                   executionMode={executionMode}
                   userTools={userTools}
                   onEditTask={editTask}
@@ -5201,6 +5422,199 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
           );
         })()}
       </main>
+
+      {/* Quick capture toast */}
+      {quickCaptureToast && (
+        <div style={{
+          position: "fixed",
+          bottom: 24,
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "#2DA44E",
+          color: "#fff",
+          padding: "10px 18px",
+          borderRadius: 10,
+          fontSize: 13,
+          fontWeight: 600,
+          fontFamily: FONT,
+          zIndex: 1001,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+        }}>
+          Added to {quickCaptureToast}
+        </div>
+      )}
+
+      {/* Catch-up panel */}
+      {showCatchUp && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.3)",
+            zIndex: 900,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "flex-start",
+            overflowY: "auto",
+            padding: "60px 20px 40px",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCatchUp(false); }}
+        >
+          <div style={{
+            background: "#F7F6F3",
+            borderRadius: 16,
+            width: "100%",
+            maxWidth: 640,
+            padding: "28px 24px",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 700, color: TEXT, margin: 0 }}>30-Second Catch-Up</h2>
+              <button
+                onClick={() => setShowCatchUp(false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: 20,
+                  color: TEXT_LIGHT,
+                  cursor: "pointer",
+                  padding: "4px 8px",
+                  lineHeight: 1,
+                }}
+              >
+                x
+              </button>
+            </div>
+
+            {savedPlans.length === 0 ? (
+              <div style={{ padding: 20, textAlign: "center", color: TEXT_LIGHT, fontSize: 14 }}>
+                No projects yet. Create your first project to see a summary here.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {savedPlans.map((sp) => {
+                  const tasks = getAllTasks(sp.nodes);
+                  const doneSet = new Set(sp.done_ids || []);
+                  const doneTasks = tasks.filter((t) => doneSet.has(t.id));
+                  const totalTasks = tasks.length;
+                  const pct = totalTasks > 0 ? Math.round((doneTasks.length / totalTasks) * 100) : 0;
+
+                  // Last completed task
+                  const lastDone = doneTasks.length > 0 ? doneTasks[doneTasks.length - 1] : null;
+
+                  // Next task (top scored pending)
+                  const unlockedNodes = computeUnlocked(sp.nodes, doneSet);
+                  const pendingTasks = getAllTasks(unlockedNodes).filter((t) => t.status === "pending" && !doneSet.has(t.id));
+                  const scored = scoreTasks(pendingTasks, tasks, null, sp.priority || "medium");
+                  const nextTask = scored[0]?.task || null;
+
+                  // Deadline warnings: tasks with deadline within 48 hours
+                  const now = Date.now();
+                  const deadlineWarnings = tasks.filter((t) => {
+                    if (!t.deadline || doneSet.has(t.id)) return false;
+                    const dl = new Date(t.deadline).getTime();
+                    return dl - now < 48 * 60 * 60 * 1000 && dl - now > -48 * 60 * 60 * 1000;
+                  });
+
+                  return (
+                    <div key={sp.id} style={{
+                      background: SURFACE,
+                      borderRadius: 12,
+                      padding: "16px 20px",
+                      border: `1px solid ${BORDER}`,
+                    }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: TEXT, marginBottom: 8 }}>
+                        {sp.project_title || "Untitled project"}
+                      </div>
+
+                      {/* Progress bar */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                        <div style={{
+                          flex: 1,
+                          height: 6,
+                          borderRadius: 3,
+                          background: `${BORDER}`,
+                          overflow: "hidden",
+                        }}>
+                          <div style={{
+                            width: `${pct}%`,
+                            height: "100%",
+                            borderRadius: 3,
+                            background: pct === 100 ? "#2DA44E" : PRIMARY,
+                            transition: "width 0.3s",
+                          }} />
+                        </div>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: pct === 100 ? "#2DA44E" : TEXT, whiteSpace: "nowrap" }}>
+                          {doneTasks.length}/{totalTasks} done
+                        </span>
+                      </div>
+
+                      {/* Last activity */}
+                      {lastDone && (
+                        <div style={{ fontSize: 12, color: TEXT_LIGHT, marginBottom: 4 }}>
+                          Last: Completed &ldquo;{lastDone.title}&rdquo;
+                        </div>
+                      )}
+
+                      {/* Next task */}
+                      {nextTask && (
+                        <div style={{ fontSize: 13, fontWeight: 600, color: PRIMARY, marginBottom: 4 }}>
+                          Next up: {nextTask.title}
+                        </div>
+                      )}
+
+                      {/* Deadline warnings */}
+                      {deadlineWarnings.length > 0 && (
+                        <div style={{ marginTop: 6 }}>
+                          {deadlineWarnings.map((t) => {
+                            const hoursLeft = Math.round((new Date(t.deadline!).getTime() - now) / (1000 * 60 * 60));
+                            const isOverdue = hoursLeft < 0;
+                            return (
+                              <div key={t.id} style={{
+                                fontSize: 12,
+                                fontWeight: 600,
+                                color: "#CF522E",
+                                padding: "3px 0",
+                              }}>
+                                {isOverdue ? "OVERDUE" : `Due in ${hoursLeft}h`}: {t.title}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {doneTasks.length === totalTasks && totalTasks > 0 && (
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#2DA44E", marginTop: 4 }}>
+                          All done!
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div style={{ textAlign: "center", marginTop: 20 }}>
+              <button
+                onClick={() => setShowCatchUp(false)}
+                style={{
+                  padding: "8px 24px",
+                  borderRadius: 8,
+                  border: `1px solid ${BORDER}`,
+                  background: SURFACE,
+                  color: TEXT,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: FONT,
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Undo toast */}
       {undoToast && (
