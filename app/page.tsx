@@ -148,9 +148,6 @@ export default function Home() {
   const [byoJsonError, setByoJsonError] = useState("");
   const [byoClarifyActive, setByoClarifyActive] = useState(false);
   const [byoPlanActive, setByoPlanActive] = useState(false);
-  const [byoCopied, setByoCopied] = useState(false);
-  const [byoOpenedTool, setByoOpenedTool] = useState<string | null>(null);
-  const [byoWaitingForResult, setByoWaitingForResult] = useState(false);
   const [showMcpSetup, setShowMcpSetup] = useState(false);
   const [mcpCopiedStep, setMcpCopiedStep] = useState<string | null>(null);
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://your-project.supabase.co";
@@ -862,50 +859,6 @@ export default function Home() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // Tool URL map for "Open in [Tool]" buttons
-  const TOOL_URLS: Partial<Record<UserTool, string>> = {
-    "claude-cowork": "https://claude.ai/new",
-    "claude-max": "https://claude.ai/new",
-    "chatgpt-plus": "https://chatgpt.com",
-    "gemini-pro": "https://gemini.google.com/app",
-  };
-
-  const getPreferredByoTool = (): { tool: UserTool; cap: typeof TOOL_CAPABILITIES[UserTool]; url: string | null } | null => {
-    // Prefer the user's preferred tool, then first non-API non-claude-code tool
-    const candidates = userTools.preferred
-      ? [userTools.preferred, ...userTools.available.filter(t => t !== userTools.preferred)]
-      : userTools.available;
-    for (const t of candidates) {
-      if (!TOOL_CAPABILITIES[t].isApi && t !== "claude-code") {
-        return { tool: t, cap: TOOL_CAPABILITIES[t], url: TOOL_URLS[t] || null };
-      }
-    }
-    // If no web tool, return first available for label purposes
-    if (candidates.length > 0) {
-      const t = candidates[0];
-      return { tool: t, cap: TOOL_CAPABILITIES[t], url: TOOL_URLS[t] || null };
-    }
-    return null;
-  };
-
-  const handleOpenInTool = (prompt: string) => {
-    const info = getPreferredByoTool();
-    navigator.clipboard.writeText(prompt).then(() => {
-      setByoCopied(true);
-      if (info?.url) {
-        setByoOpenedTool(info.cap.label);
-        window.open(info.url, "_blank");
-        setByoWaitingForResult(true);
-        setTimeout(() => {
-          setByoCopied(false);
-          setByoOpenedTool(null);
-        }, 3000);
-      } else {
-        setTimeout(() => setByoCopied(false), 2000);
-      }
-    });
-  };
-
   // Check if user has a relevant BYOK key for direct API calls
   const getRelevantByoKey = (): { provider: string; key: string; header: string } | null => {
     if (byoKeys.anthropic) return { provider: "Anthropic", key: byoKeys.anthropic, header: "x-user-anthropic-key" };
@@ -1138,6 +1091,7 @@ export default function Home() {
       const unlockedNodes = computeUnlocked(receivedPlan.nodes, new Set());
       setPlan({ ...receivedPlan, nodes: unlockedNodes });
       setDoneIds(new Set());
+      setTaskOutputs({});
       setDoneSubtaskIds(new Set());
       setByoPlanActive(false);
       setStep("reveal");
@@ -1369,93 +1323,8 @@ export default function Home() {
       return;
     }
 
-    // BYO mode: show prompt for user to copy to their AI
-    if (executionMode === "byo" && userTools.available.length > 0) {
-      const todayDate = new Date().toISOString().split("T")[0];
-      const prompt = `You are a project planning assistant. A user has given you this project brief:
-
-"${enrichedBrief}"
-
-Generate a structured project plan as a DAG (directed acyclic graph) of tasks.
-
-Rules:
-- Each task needs a unique id (use short slugs like "setup-account", "draft-description")
-- The "type" field must be exactly "task" for individual tasks or "parallel_group" for groups of parallel tasks
-- depends_on lists the ids of tasks that must complete before this task can start
-- The first task(s) should have an empty depends_on array
-- Use parallel_group to group tasks that can run simultaneously (they share the same dependencies)
-- Children inside a parallel_group can depend on tasks outside the group (via the group's depends_on) but should not depend on each other
-- All tasks must have status: "pending" (the system will compute locked/unlocked states)
-- assignee is "agent" (AI can fully automate), "user" (human must do it), or "hybrid" (agent drafts, human reviews)
-- energy is "high" (significant effort), "medium" (moderate effort), or "low" (quick task)
-- Do NOT include subtasks — keep this lean
-
-AGENT TYPE ASSIGNMENT:
-For tasks with assignee "agent" or "hybrid", set agent_type:
-- "claude-code": Tasks that need real coding, implementation, debugging, complex reasoning, or working with code repositories.
-- "builtin": Simpler agent tasks — drafting content, researching, generating text, filling templates.
-- Leave agent_type undefined for "user" tasks.
-
-CRITICAL — DEPENDENCY RULES:
-A dependency (depends_on) means: "this task LITERALLY CANNOT START without the OUTPUT of that task." Not "it would be nice to do first" — it means IMPOSSIBLE without it.
-
-For EVERY dependency you add, ask: "What specific output from task A does task B need?" If you can't name it, there is no dependency.
-
-CROSS-TYPE DEPENDENCIES (most important):
-- Agent tasks CAN depend on user tasks IF the agent needs something only the human can provide
-- User tasks CAN depend on agent tasks IF the user needs the agent's output to act
-- But MOST agent tasks and user tasks are INDEPENDENT and should run in parallel
-
-NEVER DO THIS:
-- Serial chain where everything depends on the previous task
-- Agent task waiting on a user task when it doesn't need the user's output
-- Marking tasks as dependent just because they're in the same topic area
-
-ALWAYS DO THIS:
-- Multiple tasks with empty depends_on (things that can start immediately)
-- Use parallel_group for tasks with identical dependencies
-- Let agents and humans work simultaneously whenever their tasks are independent
-
-SCHEDULING INTELLIGENCE — WAIT TIMES:
-For any task where completion triggers a WAIT before the next step can happen, set:
-- has_wait_after: true
-- wait_type: "response", "build", "approval", "processing", "shipping", or "other"
-- estimated_wait: "minutes", "hours", "days", or "weeks"
-
-DEADLINES:
-If the user mentions any deadlines, due dates, or time constraints, tag tasks with a \`deadline\` ISO date string. Today's date is ${todayDate}. Only set deadline on tasks that actually have time constraints.
-
-TASK CATEGORIES:
-Tag each task with a \`category\` from: coding, writing, emails, research, errands, calls, planning, review.
-
-Return as JSON with this structure:
-{
-  "project_title": "Short project title",
-  "summary": "1-2 sentence summary",
-  "nodes": [
-    {
-      "type": "task",
-      "id": "slug-id",
-      "title": "Task title",
-      "description": "What to do",
-      "status": "pending",
-      "assignee": "user" | "agent" | "hybrid",
-      "agent_type": "claude-code" | "builtin",
-      "energy": "high" | "medium" | "low",
-      "category": "coding" | "writing" | "emails" | "research" | "errands" | "calls" | "planning" | "review",
-      "depends_on": ["other-task-id"]
-    },
-    {
-      "type": "parallel_group",
-      "id": "group-id",
-      "depends_on": ["other-task-id"],
-      "children": [ ...tasks... ]
-    }
-  ]
-}
-
-Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the dependency graph is valid — no circular dependencies, and every id referenced in depends_on must exist.`;
-      setByoPlanPrompt(prompt);
+    // BYO mode without API keys: show message to add keys
+    if (executionMode === "byo" && !byokKey) {
       setByoPlanActive(true);
       setCompileStartTime(null);
       return;
@@ -2449,40 +2318,11 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                   Pick the style that fits you best. You can always change this later.
                 </p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                  {/* Planner card */}
-                  <button
-                    onClick={() => {
-                      setUserProfile({ mode: "planner", hasAiTools: false, setupMcp: false });
-                      setExecutionMode("byo");
-                      setJustMeMode(true);
-                      setOnboardingScreen(3);
-                    }}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "28px 28px",
-                      borderRadius: 16,
-                      border: `2px solid ${BORDER}`,
-                      background: SURFACE,
-                      cursor: "pointer",
-                      fontFamily: "'DM Sans', sans-serif",
-                      transition: "border-color 0.15s, box-shadow 0.15s",
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = PRIMARY; e.currentTarget.style.boxShadow = `0 0 0 1px ${PRIMARY}20`; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.boxShadow = "none"; }}
-                  >
-                    <div style={{ fontSize: 32, marginBottom: 12 }}>📋</div>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 6 }}>I just want a plan</div>
-                    <div style={{ fontSize: 15, color: TEXT_LIGHT, lineHeight: 1.5 }}>
-                      Give me a smart plan for my projects. I&apos;ll handle execution myself or with my own tools.
-                    </div>
-                  </button>
-
-                  {/* Builder card */}
+                  {/* BYO card */}
                   <button
                     onClick={() => {
                       setUserProfile((prev) => ({ ...prev, mode: "builder", hasAiTools: true }));
+                      setExecutionMode("byo");
                       setOnboardingScreen(2);
                     }}
                     style={{
@@ -2500,14 +2340,14 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                     onMouseEnter={(e) => { e.currentTarget.style.borderColor = PRIMARY; e.currentTarget.style.boxShadow = `0 0 0 1px ${PRIMARY}20`; }}
                     onMouseLeave={(e) => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.boxShadow = "none"; }}
                   >
-                    <div style={{ fontSize: 32, marginBottom: 12 }}>🔗</div>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 6 }}>I have AI tools — coordinate them</div>
+                    <div style={{ fontSize: 32, marginBottom: 12 }}>🔑</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 6 }}>I&apos;ll bring my own AI</div>
                     <div style={{ fontSize: 15, color: TEXT_LIGHT, lineHeight: 1.5 }}>
-                      I already use Claude Code, ChatGPT, Gemini, etc. Route tasks to my tools and save me API costs.
+                      Use your own API keys or Claude Code with MCP. You control the costs.
                     </div>
                   </button>
 
-                  {/* Full card */}
+                  {/* Full/API card */}
                   <button
                     onClick={() => {
                       setUserProfile({ mode: "full", hasAiTools: false, setupMcp: false });
@@ -2532,7 +2372,7 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                     <div style={{ fontSize: 32, marginBottom: 12 }}>⚡</div>
                     <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 6 }}>Just make it work</div>
                     <div style={{ fontSize: 15, color: TEXT_LIGHT, lineHeight: 1.5 }}>
-                      Use your AI to plan and execute. I&apos;ll handle the human parts.
+                      We handle the AI. Start building immediately.
                     </div>
                   </button>
                 </div>
@@ -2563,156 +2403,108 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
             {onboardingScreen === 2 && (
               <div>
                 <h1 style={{ fontSize: 32, fontWeight: 700, color: TEXT, marginBottom: 8, textAlign: "center", fontFamily: "'DM Sans', sans-serif" }}>
-                  What do you have?
+                  How do you connect?
                 </h1>
                 <p style={{ fontSize: 16, color: TEXT_LIGHT, marginBottom: 36, textAlign: "center", fontFamily: "'DM Sans', sans-serif", lineHeight: 1.6 }}>
-                  Select the AI tools you already have access to. We&apos;ll pick the best one for each job.
+                  Choose your path. You can always change this later.
                 </p>
 
-                {/* Subscriptions group */}
-                <div style={{ marginBottom: 28 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: TEXT_LIGHT, textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 12, fontFamily: "'DM Sans', sans-serif" }}>
-                    Subscriptions
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    {(["claude-code", "claude-cowork", "claude-max", "chatgpt-plus", "gemini-pro"] as UserTool[]).map((tool) => {
-                      const cap = TOOL_CAPABILITIES[tool];
-                      const isSelected = onboardingTools.includes(tool);
-                      return (
-                        <button
-                          key={tool}
-                          onClick={() => {
-                            setOnboardingTools((prev) =>
-                              isSelected ? prev.filter((t) => t !== tool) : [...prev, tool]
-                            );
-                          }}
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {/* API Keys path */}
+                  <div style={{
+                    padding: "24px", borderRadius: 16,
+                    border: `2px solid ${BORDER}`, background: SURFACE,
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 4 }}>🔑 API Keys</div>
+                    <div style={{ fontSize: 14, color: TEXT_LIGHT, marginBottom: 16, lineHeight: 1.5 }}>
+                      Add at least one key. We&apos;ll use it for all AI operations.
+                    </div>
+                    {(["anthropic", "google", "openai"] as const).map((provider) => (
+                      <div key={provider} style={{ marginBottom: 10 }}>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: TEXT, display: "block", marginBottom: 4, textTransform: "capitalize" as const }}>
+                          {provider === "anthropic" ? "Anthropic" : provider === "google" ? "Google AI" : "OpenAI"} API Key
+                        </label>
+                        <input
+                          type="password"
+                          value={byokKeysDraft[provider] || byoKeys[provider] || ""}
+                          onChange={(e) => setByokKeysDraft((prev) => ({ ...prev, [provider]: e.target.value }))}
+                          placeholder={`sk-...`}
                           style={{
-                            display: "flex",
-                            alignItems: "flex-start",
-                            gap: 12,
-                            padding: "16px 16px",
-                            borderRadius: 12,
-                            border: `2px solid ${isSelected ? PRIMARY : BORDER}`,
-                            background: isSelected ? `${PRIMARY}08` : SURFACE,
-                            cursor: "pointer",
-                            fontFamily: "'DM Sans', sans-serif",
-                            textAlign: "left",
-                            transition: "border-color 0.15s",
-                            position: "relative" as const,
+                            width: "100%", padding: "8px 12px", fontSize: 13,
+                            fontFamily: "'DM Mono', monospace", borderRadius: 8,
+                            border: `1.5px solid ${BORDER}`, background: "#FAFAF9",
+                            outline: "none", boxSizing: "border-box",
                           }}
-                          onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.borderColor = `${PRIMARY}60`; }}
-                          onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.borderColor = BORDER; }}
-                        >
-                          {isSelected && (
-                            <div style={{ position: "absolute", top: 8, right: 8, fontSize: 14, color: PRIMARY }}>✓</div>
-                          )}
-                          <div style={{ fontSize: 24, flexShrink: 0 }}>{cap.icon}</div>
-                          <div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 2 }}>{cap.label}</div>
-                            <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
-                              {cap.strengths.join(", ")}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
+                        />
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => {
+                        const merged = { ...byoKeys, ...byokKeysDraft };
+                        setByoKeys(merged);
+                        localStorage.setItem("letsbegin-byo-keys", JSON.stringify(merged));
+                        const tools: UserTool[] = [];
+                        if (merged.anthropic) tools.push("api-anthropic");
+                        if (merged.google) tools.push("api-google");
+                        if (merged.openai) tools.push("api-openai");
+                        if (tools.length > 0) {
+                          setUserTools({ available: tools });
+                          setExecutionMode("byo");
+                          setUserProfile((prev) => ({ ...prev, hasAiTools: true }));
+                          setOnboardingScreen(3);
+                        }
+                      }}
+                      disabled={!byokKeysDraft.anthropic && !byokKeysDraft.google && !byokKeysDraft.openai && !byoKeys.anthropic && !byoKeys.google && !byoKeys.openai}
+                      style={{
+                        marginTop: 8, padding: "10px 24px", border: "none", borderRadius: 10,
+                        background: PRIMARY, color: "#fff", fontSize: 14, fontWeight: 600,
+                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                        opacity: (!byokKeysDraft.anthropic && !byokKeysDraft.google && !byokKeysDraft.openai && !byoKeys.anthropic && !byoKeys.google && !byoKeys.openai) ? 0.5 : 1,
+                      }}
+                    >
+                      Save keys & continue
+                    </button>
+                  </div>
+
+                  {/* MCP path */}
+                  <div style={{
+                    padding: "24px", borderRadius: 16,
+                    border: `2px solid ${BORDER}`, background: SURFACE,
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 4 }}>🧠 MCP (Claude Code)</div>
+                    <div style={{ fontSize: 14, color: TEXT_LIGHT, marginBottom: 12, lineHeight: 1.5 }}>
+                      For the most seamless experience. Claude Code handles everything automatically via MCP tools.
+                    </div>
+                    <button
+                      onClick={() => {
+                        setUserTools({ available: ["claude-code"] });
+                        setExecutionMode("byo");
+                        setUserProfile((prev) => ({ ...prev, hasAiTools: true, setupMcp: true }));
+                        setOnboardingScreen(3);
+                      }}
+                      style={{
+                        padding: "10px 24px", border: `1.5px solid ${BORDER}`, borderRadius: 10,
+                        background: "transparent", color: TEXT, fontSize: 14, fontWeight: 600,
+                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      I use Claude Code
+                    </button>
                   </div>
                 </div>
-
-                {/* API Keys group */}
-                <div style={{ marginBottom: 32 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: TEXT_LIGHT, textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 12, fontFamily: "'DM Sans', sans-serif" }}>
-                    API Keys
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    {(["api-anthropic", "api-google", "api-openai"] as UserTool[]).map((tool) => {
-                      const cap = TOOL_CAPABILITIES[tool];
-                      const isSelected = onboardingTools.includes(tool);
-                      return (
-                        <button
-                          key={tool}
-                          onClick={() => {
-                            setOnboardingTools((prev) =>
-                              isSelected ? prev.filter((t) => t !== tool) : [...prev, tool]
-                            );
-                          }}
-                          style={{
-                            display: "flex",
-                            alignItems: "flex-start",
-                            gap: 12,
-                            padding: "16px 16px",
-                            borderRadius: 12,
-                            border: `2px solid ${isSelected ? PRIMARY : BORDER}`,
-                            background: isSelected ? `${PRIMARY}08` : SURFACE,
-                            cursor: "pointer",
-                            fontFamily: "'DM Sans', sans-serif",
-                            textAlign: "left",
-                            transition: "border-color 0.15s",
-                            position: "relative" as const,
-                          }}
-                          onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.borderColor = `${PRIMARY}60`; }}
-                          onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.borderColor = BORDER; }}
-                        >
-                          {isSelected && (
-                            <div style={{ position: "absolute", top: 8, right: 8, fontSize: 14, color: PRIMARY }}>✓</div>
-                          )}
-                          <div style={{ fontSize: 24, flexShrink: 0 }}>{cap.icon}</div>
-                          <div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 2 }}>{cap.label}</div>
-                            <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
-                              {cap.strengths.join(", ")}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <p style={{ fontSize: 14, color: TEXT_LIGHT, textAlign: "center", marginBottom: 24, fontFamily: "'DM Sans', sans-serif", lineHeight: 1.5 }}>
-                  These tools will handle your AI tasks. We&apos;ll pick the best one for each job.
-                </p>
-
-                {onboardingTools.length > 0 && (
-                  <button
-                    onClick={() => {
-                      setUserTools({ available: onboardingTools });
-                      setExecutionMode("byo");
-                      setUserProfile((prev) => ({ ...prev, hasAiTools: true }));
-                      setOnboardingScreen(3);
-                    }}
-                    style={{
-                      width: "100%",
-                      padding: "16px 24px",
-                      borderRadius: 12,
-                      border: "none",
-                      background: PRIMARY,
-                      color: "#fff",
-                      fontSize: 16,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      fontFamily: "'DM Sans', sans-serif",
-                    }}
-                  >
-                    Continue →
-                  </button>
-                )}
 
                 <div style={{ textAlign: "center", marginTop: 16 }}>
                   <button
                     onClick={() => setOnboardingScreen(1)}
                     style={{
-                      background: "none",
-                      border: "none",
-                      color: TEXT_LIGHT,
-                      fontSize: 13,
-                      cursor: "pointer",
-                      fontFamily: "'DM Sans', sans-serif",
-                      textDecoration: "underline",
-                      textUnderlineOffset: 3,
+                      background: "none", border: "none", color: TEXT_LIGHT,
+                      fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      textDecoration: "underline", textUnderlineOffset: 3,
                     }}
                   >
-                    ← Back
+                    &larr; Back
                   </button>
                 </div>
               </div>
@@ -2735,111 +2527,13 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                   textAlign: "left",
                   fontFamily: "'DM Sans', sans-serif",
                 }}>
-                  {userProfile.mode === "planner" && (
+                  {executionMode === "byo" ? (
                     <p style={{ fontSize: 16, color: TEXT, lineHeight: 1.6, margin: 0 }}>
-                      You&apos;re set up as a <strong>planner</strong>. We&apos;ll build smart project plans — you execute with your own tools.
+                      Your AI, your costs. We&apos;ll use your API keys or MCP for all AI operations. Same experience, your quota.
                     </p>
-                  )}
-                  {userProfile.mode === "builder" && (
-                    <div>
-                      <p style={{ fontSize: 16, color: TEXT, lineHeight: 1.6, margin: 0 }}>
-                        We&apos;ll route tasks to{" "}
-                        <strong>{onboardingTools.map((t) => TOOL_CAPABILITIES[t].label).join(", ")}</strong>.
-                        You handle the human parts.
-                      </p>
-                      {onboardingTools.includes("claude-code") && (
-                        <div style={{ marginTop: 16, padding: "14px 16px", borderRadius: 10, background: SURFACE, border: `1px solid ${BORDER}` }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <div>
-                              <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 2 }}>
-                                💡 Pro tip: Set up MCP in Claude Code
-                              </div>
-                              <div style={{ fontSize: 13, color: TEXT_LIGHT }}>
-                                Enable hands-free planning with MCP integration.
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => setUserProfile((prev) => ({ ...prev, setupMcp: !prev.setupMcp }))}
-                              style={{
-                                padding: "6px 14px",
-                                borderRadius: 8,
-                                border: `1px solid ${userProfile.setupMcp ? PRIMARY : BORDER}`,
-                                background: userProfile.setupMcp ? `${PRIMARY}12` : SURFACE,
-                                color: userProfile.setupMcp ? PRIMARY : TEXT_LIGHT,
-                                fontSize: 12,
-                                fontWeight: 600,
-                                cursor: "pointer",
-                                fontFamily: "'DM Sans', sans-serif",
-                              }}
-                            >
-                              {userProfile.setupMcp ? "Hide setup" : "Show setup"}
-                            </button>
-                          </div>
-                          {userProfile.setupMcp && (
-                            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
-                              {/* Step 1 */}
-                              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                                <div style={{ minWidth: 28, height: 28, borderRadius: "50%", background: PRIMARY, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, marginTop: 2 }}>1</div>
-                                <div style={{ flex: 1 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 6 }}>One-time setup</div>
-                                  <div style={{ position: "relative" }}>
-                                    <div style={{ padding: "10px 12px", borderRadius: 8, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                                      {`git clone https://github.com/nickarino/LetsBegin.git && cd LetsBegin/mcp-server && npm install`}
-                                    </div>
-                                    <button onClick={() => { navigator.clipboard.writeText("git clone https://github.com/nickarino/LetsBegin.git && cd LetsBegin/mcp-server && npm install"); setMcpCopiedStep("onb-1"); setTimeout(() => setMcpCopiedStep(null), 2000); }} style={{ position: "absolute", top: 6, right: 6, padding: "3px 8px", borderRadius: 4, border: "none", background: mcpCopiedStep === "onb-1" ? "#2DA44E" : "#333", color: "#fff", fontSize: 10, cursor: "pointer", fontFamily: FONT }}>
-                                      {mcpCopiedStep === "onb-1" ? "Copied!" : "Copy"}
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                              {/* Step 2 */}
-                              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                                <div style={{ minWidth: 28, height: 28, borderRadius: "50%", background: PRIMARY, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, marginTop: 2 }}>2</div>
-                                <div style={{ flex: 1 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 4 }}>Add to <span style={{ fontFamily: MONO, fontSize: 12 }}>.claude/mcp.json</span></div>
-                                  <div style={{ fontSize: 11, color: TEXT_LIGHT, marginBottom: 6 }}>Service key: Supabase → Settings → API → service_role key</div>
-                                  <div style={{ position: "relative" }}>
-                                    <div style={{ padding: "10px 12px", borderRadius: 8, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-{`{
-  "mcpServers": {
-    "letsbegin": {
-      "command": "npx",
-      "args": ["tsx", "ACTUAL_PATH/mcp-server/src/index.ts"],
-      "env": {
-        "SUPABASE_URL": "${supabaseUrl}",  // pre-filled!
-        "SUPABASE_SERVICE_KEY": "YOUR_KEY"
-      }
-    }
-  }
-}`}
-                                    </div>
-                                    <button onClick={() => { navigator.clipboard.writeText(JSON.stringify({ mcpServers: { letsbegin: { command: "npx", args: ["tsx", "ACTUAL_PATH/mcp-server/src/index.ts"], env: { SUPABASE_URL: supabaseUrl, SUPABASE_SERVICE_KEY: "YOUR_KEY" } } } }, null, 2)); setMcpCopiedStep("onb-2"); setTimeout(() => setMcpCopiedStep(null), 2000); }} style={{ position: "absolute", top: 6, right: 6, padding: "3px 8px", borderRadius: 4, border: "none", background: mcpCopiedStep === "onb-2" ? "#2DA44E" : "#333", color: "#fff", fontSize: 10, cursor: "pointer", fontFamily: FONT }}>
-                                      {mcpCopiedStep === "onb-2" ? "Copied!" : "Copy config"}
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                              {/* Step 3 */}
-                              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                                <div style={{ minWidth: 28, height: 28, borderRadius: "50%", background: PRIMARY, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, marginTop: 2 }}>3</div>
-                                <div style={{ flex: 1 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 6 }}>Restart Claude Code and say:</div>
-                                  <div style={{ position: "relative" }}>
-                                    <div style={{ padding: "10px 12px", borderRadius: 8, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.6 }}>
-                                      {`"Plan my project: [your brief]"`}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {userProfile.mode === "full" && (
+                  ) : (
                     <p style={{ fontSize: 16, color: TEXT, lineHeight: 1.6, margin: 0 }}>
-                      We&apos;ll handle everything. You focus on the human tasks.
+                      We&apos;ll handle the AI. You focus on the human tasks.
                     </p>
                   )}
                 </div>
@@ -3423,219 +3117,49 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
               <span>New project</span>
             </div>
             {byoClarifyActive ? (
-              <div>
-                {/* Tool badge */}
-                {(() => {
-                  const firstTool = userTools.preferred || userTools.available[0];
-                  const cap = firstTool ? TOOL_CAPABILITIES[firstTool] : null;
-                  return cap ? (
-                    <div style={{
-                      display: "inline-flex", alignItems: "center", gap: 6,
-                      padding: "4px 10px", borderRadius: 6,
-                      background: "#E8F0FE", color: "#1967D2", fontSize: 12, fontWeight: 600, marginBottom: 12,
-                    }}>
-                      {cap.icon} Clarify with {cap.label}
-                    </div>
-                  ) : null;
-                })()}
-
-                {/* Step indicators */}
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 0,
-                  marginBottom: 14, fontSize: 12, fontFamily: "'DM Sans', sans-serif",
-                }}>
-                  {[
-                    { num: 1, label: "Copy prompt", active: !byoJsonInput.trim() && questions.length === 0, done: !!byoJsonInput.trim() || questions.length > 0 },
-                    { num: 2, label: "Paste questions JSON", active: !!byoJsonInput.trim() && questions.length === 0, done: questions.length > 0 },
-                    { num: 3, label: "Answer questions", active: questions.length > 0, done: false },
-                  ].map((s, i) => (
-                    <div key={s.num} style={{ display: "flex", alignItems: "center" }}>
-                      <div style={{
-                        display: "flex", alignItems: "center", gap: 5,
-                        padding: "4px 10px", borderRadius: 20,
-                        background: s.active ? `${PRIMARY}14` : s.done ? "#2DA44E12" : "transparent",
-                        border: `1px solid ${s.active ? PRIMARY : s.done ? "#2DA44E40" : BORDER}`,
-                        color: s.active ? PRIMARY : s.done ? "#2DA44E" : TEXT_LIGHT,
-                        fontWeight: s.active ? 600 : 400,
-                        transition: "all 0.2s",
-                      }}>
-                        <span style={{
-                          width: 18, height: 18, borderRadius: 9,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 10, fontWeight: 700,
-                          background: s.done ? "#2DA44E" : s.active ? PRIMARY : BORDER,
-                          color: s.done || s.active ? "#fff" : TEXT_LIGHT,
-                        }}>
-                          {s.done ? "\u2713" : s.num}
-                        </span>
-                        {s.label}
-                      </div>
-                      {i < 2 && (
-                        <div style={{ width: 20, height: 1, background: s.done ? "#2DA44E60" : BORDER, margin: "0 2px" }} />
-                      )}
-                    </div>
-                  ))}
+              <div style={{
+                padding: "24px", borderRadius: 14,
+                border: `1.5px solid ${BORDER}`, background: "#FAFAF9",
+                fontFamily: "'DM Sans', sans-serif", textAlign: "center",
+              }}>
+                <div style={{ fontSize: 16, fontWeight: 600, color: TEXT, marginBottom: 8 }}>
+                  Add your API key to plan with your own AI
                 </div>
-
-                <div style={{ fontSize: 12, color: TEXT_LIGHT, marginBottom: 10, fontStyle: "italic" }}>
-                  This saves API costs by using your own AI
+                <div style={{ fontSize: 14, color: TEXT_LIGHT, marginBottom: 16, lineHeight: 1.5 }}>
+                  Once you add an API key, we&apos;ll use it transparently for all AI operations.
                 </div>
-
-                {/* Copyable prompt block */}
-                <div
-                  onClick={() => {
-                    navigator.clipboard.writeText(byoClarifyPrompt).then(() => {
-                      setByoCopied(true);
-                      setTimeout(() => setByoCopied(false), 2000);
-                    });
-                  }}
-                  style={{
-                    background: "#1C1C1E", borderRadius: 10,
-                    padding: 14, fontSize: 12,
-                    fontFamily: "'DM Mono', 'Fira Code', monospace",
-                    lineHeight: 1.5, color: "#8FBC8F",
-                    marginBottom: 8, cursor: "pointer",
-                    whiteSpace: "pre-wrap", wordBreak: "break-word",
-                    maxHeight: 200, overflow: "auto",
-                    position: "relative",
-                  }}
-                  title="Click to copy prompt"
-                >
-                  {byoClarifyPrompt}
-                </div>
-
-                {/* Open in Tool + Copy buttons */}
-                <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center", flexWrap: "wrap" }}>
-                  {(() => {
-                    const info = getPreferredByoTool();
-                    if (info?.url) {
-                      return (
-                        <button
-                          onClick={() => handleOpenInTool(byoClarifyPrompt)}
-                          style={{
-                            padding: "8px 18px", border: "none", borderRadius: 8,
-                            background: byoOpenedTool ? "#2DA44E" : PRIMARY,
-                            color: "#fff", fontSize: 13, fontWeight: 600,
-                            cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                            transition: "background 0.2s",
-                            display: "inline-flex", alignItems: "center", gap: 6,
-                          }}
-                        >
-                          {byoOpenedTool
-                            ? `Prompt copied! Opening ${byoOpenedTool}...`
-                            : `Open in ${info.cap.label} \u2192`}
-                        </button>
-                      );
-                    }
-                    return null;
-                  })()}
+                <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
                   <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(byoClarifyPrompt).then(() => {
-                        setByoCopied(true);
-                        setTimeout(() => setByoCopied(false), 2000);
-                      });
-                    }}
+                    onClick={() => { setShowByokSection(true); }}
                     style={{
-                      padding: "6px 14px", border: `1px solid ${BORDER}`, borderRadius: 8,
-                      background: byoCopied ? "#2DA44E" : "transparent",
-                      color: byoCopied ? "#fff" : TEXT_LIGHT, fontSize: 12, fontWeight: 500,
-                      cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                      transition: "all 0.2s",
-                    }}
-                  >
-                    {byoCopied ? "\u2713 Copied!" : "Copy prompt"}
-                  </button>
-                </div>
-
-                {/* Waiting for result indicator */}
-                {byoWaitingForResult && !byoJsonInput.trim() && (
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "8px 12px", borderRadius: 8,
-                    background: `${PRIMARY}08`, border: `1px solid ${PRIMARY}20`,
-                    marginBottom: 10, fontSize: 12, color: PRIMARY, fontWeight: 500,
-                  }}>
-                    <div style={{
-                      width: 12, height: 12,
-                      border: `2px solid ${PRIMARY}`,
-                      borderTopColor: "transparent",
-                      borderRadius: "50%",
-                      animation: "spin 0.8s linear infinite",
-                    }} />
-                    Waiting for your result...
-                  </div>
-                )}
-
-                {/* Paste area */}
-                <div style={{ marginTop: 4 }}>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: TEXT, display: "block", marginBottom: 6 }}>
-                    Paste the JSON result from your AI:
-                  </label>
-                  <textarea
-                    value={byoJsonInput}
-                    onChange={(e) => { setByoJsonInput(e.target.value); setByoJsonError(""); }}
-                    placeholder={'{\n  "questions": [\n    { "id": "scope", "question": "...", "type": "short" }\n  ]\n}'}
-                    style={{
-                      width: "100%", minHeight: 120, padding: 12, fontSize: 13,
-                      fontFamily: "'DM Mono', 'Fira Code', monospace", borderRadius: 10,
-                      border: `1.5px solid ${byoJsonError ? "#CF522E" : BORDER}`,
-                      background: "#FAFAF9",
-                      outline: "none", resize: "vertical", lineHeight: 1.5,
-                      boxSizing: "border-box",
-                    }}
-                  />
-                  {byoJsonError && (
-                    <div style={{ fontSize: 12, color: "#CF522E", marginTop: 6 }}>{byoJsonError}</div>
-                  )}
-                </div>
-
-                {/* Action buttons */}
-                <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
-                  {byoJsonInput.trim() && (
-                    <button
-                      onClick={handleByoClarifyPaste}
-                      style={{
-                        padding: "10px 24px", border: "none", borderRadius: 10,
-                        background: PRIMARY, color: "#fff", fontSize: 14, fontWeight: 600,
-                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                      }}
-                    >
-                      Load questions
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      setByoClarifyActive(false);
-                      setAnswers({});
-                      handleCompile();
-                    }}
-                    style={{
-                      padding: "10px 20px", border: `1px solid ${BORDER}`, borderRadius: 10,
-                      background: SURFACE, color: TEXT_LIGHT, fontSize: 13,
+                      padding: "10px 24px", border: "none", borderRadius: 10,
+                      background: PRIMARY, color: "#fff", fontSize: 14, fontWeight: 600,
                       cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
                     }}
                   >
-                    Skip questions
+                    Add your API key
                   </button>
                   <button
                     onClick={handleClarifyFallbackToApi}
                     style={{
-                      padding: "10px 16px", border: "none", borderRadius: 10,
-                      background: "transparent", color: TEXT_LIGHT, fontSize: 12,
+                      padding: "10px 20px", border: `1px solid ${BORDER}`, borderRadius: 10,
+                      background: SURFACE, color: TEXT, fontSize: 14, fontWeight: 500,
                       cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                      textDecoration: "underline", textDecorationStyle: "dotted" as const,
                     }}
                   >
-                    Use our AI instead
+                    Use our API instead
                   </button>
-                  <div style={{ flex: 1 }} />
+                </div>
+                <div style={{ fontSize: 12, color: TEXT_LIGHT, marginTop: 14 }}>
+                  Or if you use Claude Code: set up MCP for hands-free execution.
+                </div>
+                <div style={{ marginTop: 12 }}>
                   <button
                     onClick={() => setStep("input")}
                     style={{
-                      padding: "10px 16px", border: `1px solid ${BORDER}`, borderRadius: 10,
-                      background: "transparent", color: TEXT_LIGHT, fontSize: 13,
+                      background: "none", border: "none", color: TEXT_LIGHT, fontSize: 13,
                       cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      textDecoration: "underline", textDecorationStyle: "dotted" as const,
                     }}
                   >
                     &larr; Back to brief
@@ -3973,296 +3497,49 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
               <span>New project</span>
             </div>
             {byoPlanActive ? (
-              <div>
-                {/* Tool badge */}
-                {(() => {
-                  const firstTool = userTools.preferred || userTools.available[0];
-                  const cap = firstTool ? TOOL_CAPABILITIES[firstTool] : null;
-                  return cap ? (
-                    <div style={{
-                      display: "inline-flex", alignItems: "center", gap: 6,
-                      padding: "4px 10px", borderRadius: 6,
-                      background: "#E8F0FE", color: "#1967D2", fontSize: 12, fontWeight: 600, marginBottom: 12,
-                    }}>
-                      {cap.icon} Plan with {cap.label}
-                    </div>
-                  ) : null;
-                })()}
-
-                {/* Step indicators */}
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 0,
-                  marginBottom: 14, fontSize: 12, fontFamily: "'DM Sans', sans-serif",
-                }}>
-                  {[
-                    { num: 1, label: "Copy prompt", active: !byoJsonInput.trim(), done: !!byoJsonInput.trim() },
-                    { num: 2, label: "Paste plan JSON", active: !!byoJsonInput.trim(), done: false },
-                  ].map((s, i) => (
-                    <div key={s.num} style={{ display: "flex", alignItems: "center" }}>
-                      <div style={{
-                        display: "flex", alignItems: "center", gap: 5,
-                        padding: "4px 10px", borderRadius: 20,
-                        background: s.active ? `${PRIMARY}14` : s.done ? "#2DA44E12" : "transparent",
-                        border: `1px solid ${s.active ? PRIMARY : s.done ? "#2DA44E40" : BORDER}`,
-                        color: s.active ? PRIMARY : s.done ? "#2DA44E" : TEXT_LIGHT,
-                        fontWeight: s.active ? 600 : 400,
-                        transition: "all 0.2s",
-                      }}>
-                        <span style={{
-                          width: 18, height: 18, borderRadius: 9,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 10, fontWeight: 700,
-                          background: s.done ? "#2DA44E" : s.active ? PRIMARY : BORDER,
-                          color: s.done || s.active ? "#fff" : TEXT_LIGHT,
-                        }}>
-                          {s.done ? "\u2713" : s.num}
-                        </span>
-                        {s.label}
-                      </div>
-                      {i < 1 && (
-                        <div style={{ width: 20, height: 1, background: s.done ? "#2DA44E60" : BORDER, margin: "0 2px" }} />
-                      )}
-                    </div>
-                  ))}
+              <div style={{
+                padding: "24px", borderRadius: 14,
+                border: `1.5px solid ${BORDER}`, background: "#FAFAF9",
+                fontFamily: "'DM Sans', sans-serif", textAlign: "center",
+              }}>
+                <div style={{ fontSize: 16, fontWeight: 600, color: TEXT, marginBottom: 8 }}>
+                  Add your API key to build plans with your own AI
                 </div>
-
-                <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8, color: TEXT }}>
-                  Generate your plan
-                </h2>
-                <div style={{ fontSize: 12, color: TEXT_LIGHT, marginBottom: 12, fontStyle: "italic" }}>
-                  This saves API costs by using your own AI
+                <div style={{ fontSize: 14, color: TEXT_LIGHT, marginBottom: 16, lineHeight: 1.5 }}>
+                  Once you add an API key, we&apos;ll use it transparently for all AI operations.
                 </div>
-
-                {/* MCP callout for Claude Code users */}
-                {userTools.available.includes("claude-code") && (
-                  <div style={{
-                    padding: "12px 16px", borderRadius: 10,
-                    background: "#E8F0FE", border: "1px solid #1967D240",
-                    marginBottom: 14,
-                  }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1967D2", marginBottom: 4 }}>
-                      Using Claude Code? Skip all this.
-                    </div>
-                    <div style={{ fontSize: 12, color: "#37352F", lineHeight: 1.5, marginBottom: 6 }}>
-                      Set up the LetsBegin MCP server and just say: <span style={{ fontFamily: "'DM Mono', monospace", background: "#fff", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>&quot;Plan my project: {brief.slice(0, 60)}{brief.length > 60 ? "..." : ""}&quot;</span><br />
-                      Claude Code will generate and submit the plan automatically.
-                    </div>
-                    <button
-                      onClick={() => setShowMcpSetup((v) => !v)}
-                      style={{
-                        padding: "4px 12px", border: "none", borderRadius: 6,
-                        background: "#1967D2", color: "#fff", fontSize: 12, fontWeight: 600,
-                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                      }}
-                    >
-                      {showMcpSetup ? "Hide setup" : "Set up MCP \u2192"}
-                    </button>
-                    {showMcpSetup && (
-                      <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
-                        {/* Step 1 */}
-                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                          <div style={{ minWidth: 24, height: 24, borderRadius: "50%", background: "#1967D2", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, marginTop: 2 }}>1</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: TEXT, marginBottom: 4 }}>One-time setup</div>
-                            <div style={{ position: "relative" }}>
-                              <div style={{ padding: "8px 10px", borderRadius: 6, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                                {`git clone https://github.com/nickarino/LetsBegin.git && cd LetsBegin/mcp-server && npm install`}
-                              </div>
-                              <button onClick={() => { navigator.clipboard.writeText("git clone https://github.com/nickarino/LetsBegin.git && cd LetsBegin/mcp-server && npm install"); setMcpCopiedStep("byo-1"); setTimeout(() => setMcpCopiedStep(null), 2000); }} style={{ position: "absolute", top: 4, right: 4, padding: "2px 7px", borderRadius: 4, border: "none", background: mcpCopiedStep === "byo-1" ? "#2DA44E" : "#333", color: "#fff", fontSize: 10, cursor: "pointer", fontFamily: FONT }}>
-                                {mcpCopiedStep === "byo-1" ? "Copied!" : "Copy"}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                        {/* Step 2 */}
-                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                          <div style={{ minWidth: 24, height: 24, borderRadius: "50%", background: "#1967D2", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, marginTop: 2 }}>2</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: TEXT, marginBottom: 3 }}>Add to <span style={{ fontFamily: MONO, fontSize: 11 }}>.claude/mcp.json</span></div>
-                            <div style={{ fontSize: 10, color: TEXT_LIGHT, marginBottom: 5 }}>Service key: Supabase &rarr; Settings &rarr; API &rarr; service_role key</div>
-                            <div style={{ position: "relative" }}>
-                              <div style={{ padding: "8px 10px", borderRadius: 6, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-{`{
-  "mcpServers": {
-    "letsbegin": {
-      "command": "npx",
-      "args": ["tsx", "ACTUAL_PATH/mcp-server/src/index.ts"],
-      "env": {
-        "SUPABASE_URL": "${supabaseUrl}",  // pre-filled!
-        "SUPABASE_SERVICE_KEY": "YOUR_KEY"
-      }
-    }
-  }
-}`}
-                              </div>
-                              <button onClick={() => { navigator.clipboard.writeText(JSON.stringify({ mcpServers: { letsbegin: { command: "npx", args: ["tsx", "ACTUAL_PATH/mcp-server/src/index.ts"], env: { SUPABASE_URL: supabaseUrl, SUPABASE_SERVICE_KEY: "YOUR_KEY" } } } }, null, 2)); setMcpCopiedStep("byo-2"); setTimeout(() => setMcpCopiedStep(null), 2000); }} style={{ position: "absolute", top: 4, right: 4, padding: "2px 7px", borderRadius: 4, border: "none", background: mcpCopiedStep === "byo-2" ? "#2DA44E" : "#333", color: "#fff", fontSize: 10, cursor: "pointer", fontFamily: FONT }}>
-                                {mcpCopiedStep === "byo-2" ? "Copied!" : "Copy config"}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                        {/* Step 3 */}
-                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                          <div style={{ minWidth: 24, height: 24, borderRadius: "50%", background: "#1967D2", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, marginTop: 2 }}>3</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: TEXT, marginBottom: 4 }}>Restart Claude Code and say:</div>
-                            <div style={{ padding: "8px 10px", borderRadius: 6, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.5 }}>
-                              {`"Plan my project: ${brief.slice(0, 50)}${brief.length > 50 ? "..." : ""}"`}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Copyable prompt block */}
-                <div
-                  onClick={() => {
-                    navigator.clipboard.writeText(byoPlanPrompt).then(() => {
-                      setByoCopied(true);
-                      setTimeout(() => setByoCopied(false), 2000);
-                    });
-                  }}
-                  style={{
-                    background: "#1C1C1E", borderRadius: 10,
-                    padding: 14, fontSize: 11,
-                    fontFamily: "'DM Mono', 'Fira Code', monospace",
-                    lineHeight: 1.5, color: "#8FBC8F",
-                    marginBottom: 8, cursor: "pointer",
-                    whiteSpace: "pre-wrap", wordBreak: "break-word",
-                    maxHeight: 240, overflow: "auto",
-                    position: "relative",
-                  }}
-                  title="Click to copy prompt"
-                >
-                  {byoPlanPrompt}
-                </div>
-
-                {/* Open in Tool + Copy buttons */}
-                <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
-                  {(() => {
-                    const info = getPreferredByoTool();
-                    if (info?.url) {
-                      return (
-                        <button
-                          onClick={() => handleOpenInTool(byoPlanPrompt)}
-                          style={{
-                            padding: "8px 18px", border: "none", borderRadius: 8,
-                            background: byoOpenedTool ? "#2DA44E" : PRIMARY,
-                            color: "#fff", fontSize: 13, fontWeight: 600,
-                            cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                            transition: "background 0.2s",
-                            display: "inline-flex", alignItems: "center", gap: 6,
-                          }}
-                        >
-                          {byoOpenedTool
-                            ? `Prompt copied! Opening ${byoOpenedTool}...`
-                            : `Open in ${info.cap.label} \u2192`}
-                        </button>
-                      );
-                    }
-                    return null;
-                  })()}
+                <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
                   <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(byoPlanPrompt).then(() => {
-                        setByoCopied(true);
-                        setTimeout(() => setByoCopied(false), 2000);
-                      });
-                    }}
+                    onClick={() => { setShowByokSection(true); }}
                     style={{
-                      padding: "6px 14px", border: `1px solid ${BORDER}`, borderRadius: 8,
-                      background: byoCopied ? "#2DA44E" : "transparent",
-                      color: byoCopied ? "#fff" : TEXT_LIGHT, fontSize: 12, fontWeight: 500,
+                      padding: "10px 24px", border: "none", borderRadius: 10,
+                      background: PRIMARY, color: "#fff", fontSize: 14, fontWeight: 600,
                       cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                      transition: "all 0.2s",
                     }}
                   >
-                    {byoCopied ? "\u2713 Copied!" : "Copy prompt"}
+                    Add your API key
                   </button>
-                </div>
-
-                {/* Waiting for result indicator */}
-                {byoWaitingForResult && !byoJsonInput.trim() && (
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "8px 12px", borderRadius: 8,
-                    background: `${PRIMARY}08`, border: `1px solid ${PRIMARY}20`,
-                    marginBottom: 10, fontSize: 12, color: PRIMARY, fontWeight: 500,
-                  }}>
-                    <div style={{
-                      width: 12, height: 12,
-                      border: `2px solid ${PRIMARY}`,
-                      borderTopColor: "transparent",
-                      borderRadius: "50%",
-                      animation: "spin 0.8s linear infinite",
-                    }} />
-                    Waiting for your result...
-                  </div>
-                )}
-
-                {/* Paste area — prominently styled */}
-                <div style={{
-                  padding: 16, borderRadius: 12,
-                  border: `2px solid ${byoJsonInput.trim() ? PRIMARY : BORDER}`,
-                  background: byoJsonInput.trim() ? `${PRIMARY}06` : SURFACE,
-                  transition: "all 0.2s",
-                }}>
-                  <label style={{ fontSize: 14, fontWeight: 600, color: TEXT, display: "block", marginBottom: 8 }}>
-                    Paste the plan JSON from your AI:
-                  </label>
-                  <textarea
-                    value={byoJsonInput}
-                    onChange={(e) => { setByoJsonInput(e.target.value); setByoJsonError(""); }}
-                    placeholder={'{\n  "project_title": "My Project",\n  "summary": "...",\n  "nodes": [\n    { "type": "task", "id": "...", "title": "...", ... }\n  ]\n}'}
-                    style={{
-                      width: "100%", minHeight: 160, padding: 12, fontSize: 12,
-                      fontFamily: "'DM Mono', 'Fira Code', monospace", borderRadius: 10,
-                      border: `1.5px solid ${byoJsonError ? "#CF522E" : BORDER}`,
-                      background: "#fff",
-                      outline: "none", resize: "vertical", lineHeight: 1.5,
-                      boxSizing: "border-box",
-                    }}
-                  />
-                  {byoJsonError && (
-                    <div style={{ fontSize: 12, color: "#CF522E", marginTop: 6 }}>{byoJsonError}</div>
-                  )}
-                </div>
-
-                {/* Action buttons */}
-                <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap", alignItems: "center" }}>
-                  {byoJsonInput.trim() && (
-                    <button
-                      onClick={handleByoPlanPaste}
-                      style={{
-                        padding: "10px 28px", border: "none", borderRadius: 10,
-                        background: PRIMARY, color: "#fff", fontSize: 14, fontWeight: 600,
-                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                        boxShadow: `0 1px 3px ${PRIMARY}40`,
-                      }}
-                    >
-                      Build plan from JSON
-                    </button>
-                  )}
                   <button
                     onClick={handleCompileFallbackToApi}
                     style={{
-                      padding: "10px 16px", border: "none", borderRadius: 10,
-                      background: "transparent", color: TEXT_LIGHT, fontSize: 12,
+                      padding: "10px 20px", border: `1px solid ${BORDER}`, borderRadius: 10,
+                      background: SURFACE, color: TEXT, fontSize: 14, fontWeight: 500,
                       cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                      textDecoration: "underline", textDecorationStyle: "dotted" as const,
                     }}
                   >
                     Use our API instead
                   </button>
-                  <div style={{ flex: 1 }} />
+                </div>
+                <div style={{ fontSize: 12, color: TEXT_LIGHT, marginTop: 14 }}>
+                  Or if you use Claude Code: set up MCP for hands-free execution.
+                </div>
+                <div style={{ marginTop: 12 }}>
                   <button
                     onClick={() => setStep("input")}
                     style={{
-                      padding: "10px 16px", border: `1px solid ${BORDER}`, borderRadius: 10,
-                      background: "transparent", color: TEXT_LIGHT, fontSize: 13,
+                      background: "none", border: "none", color: TEXT_LIGHT, fontSize: 13,
                       cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      textDecoration: "underline", textDecorationStyle: "dotted" as const,
                     }}
                   >
                     &larr; Back to brief
@@ -5074,103 +4351,37 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                     </span>
                     {/* Mode toggle pill */}
                     {(claudeCodeCount > 0 || builtinAgentCount > 0) && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <div style={{
-                          display: "inline-flex", borderRadius: 20, overflow: "hidden",
-                          border: `1.5px solid ${BORDER}`, background: "#F7F6F3",
-                        }}>
-                          <button
-                            onClick={() => {
-                              setExecutionMode("byo");
-                              if (userTools.available.length === 0) setShowInlineToolPicker(true);
-                            }}
-                            style={{
-                              padding: "5px 14px", border: "none", cursor: "pointer",
-                              fontSize: 12, fontWeight: executionMode === "byo" ? 600 : 400,
-                              fontFamily: "'DM Sans', sans-serif",
-                              background: executionMode === "byo" ? "#E8F0FE" : "transparent",
-                              color: executionMode === "byo" ? "#1967D2" : TEXT_LIGHT,
-                              transition: "all 0.2s",
-                              borderRight: `1px solid ${BORDER}`,
-                            }}
-                          >
-                            BYO{executionMode === "byo" && userTools.available.length > 0 ? `: ${userTools.available.map(t => TOOL_CAPABILITIES[t].label).join(", ")}` : ""}
-                          </button>
-                          <button
-                            onClick={() => { setExecutionMode("api"); setShowInlineToolPicker(false); }}
-                            style={{
-                              padding: "5px 14px", border: "none", cursor: "pointer",
-                              fontSize: 12, fontWeight: executionMode === "api" ? 600 : 400,
-                              fontFamily: "'DM Sans', sans-serif",
-                              background: executionMode === "api" ? `${PRIMARY}18` : "transparent",
-                              color: executionMode === "api" ? PRIMARY : TEXT_LIGHT,
-                              transition: "all 0.2s",
-                            }}
-                          >
-                            Auto: Using our API
-                          </button>
-                        </div>
-                        {executionMode === "byo" && userTools.available.length > 0 && !showInlineToolPicker && (
-                          <button
-                            onClick={() => setShowInlineToolPicker(true)}
-                            style={{
-                              background: "none", border: "none", color: TEXT_LIGHT,
-                              fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                              textDecoration: "underline", textDecorationStyle: "dotted" as const,
-                              padding: 0, textAlign: "left",
-                            }}
-                          >
-                            Change tools
-                          </button>
-                        )}
-                        {showInlineToolPicker && executionMode === "byo" && (
-                          <div style={{
-                            display: "flex", flexWrap: "wrap", gap: 4, padding: "6px 0",
-                          }}>
-                            {(Object.keys(TOOL_CAPABILITIES) as UserTool[]).map((tool) => {
-                              const cap = TOOL_CAPABILITIES[tool];
-                              const isSelected = userTools.available.includes(tool);
-                              return (
-                                <button
-                                  key={tool}
-                                  onClick={() => {
-                                    setUserTools((prev) => {
-                                      const next = isSelected
-                                        ? prev.available.filter((t) => t !== tool)
-                                        : [...prev.available, tool];
-                                      if (next.length === 0) { setExecutionMode("api"); setShowInlineToolPicker(false); }
-                                      const newPreferred = prev.preferred === tool && isSelected ? undefined : prev.preferred;
-                                      return { ...prev, available: next as UserTool[], preferred: newPreferred };
-                                    });
-                                  }}
-                                  style={{
-                                    padding: "3px 8px", borderRadius: 6,
-                                    border: `1px solid ${isSelected ? "#1967D2" : BORDER}`,
-                                    background: isSelected ? "#E8F0FE" : "transparent",
-                                    color: isSelected ? "#1967D2" : TEXT_LIGHT,
-                                    fontSize: 11, fontWeight: isSelected ? 600 : 400,
-                                    cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                                    transition: "all 0.15s",
-                                    display: "inline-flex", alignItems: "center", gap: 3,
-                                  }}
-                                  title={cap.strengths.join(", ")}
-                                >
-                                  {cap.icon} {cap.label}
-                                </button>
-                              );
-                            })}
-                            <button
-                              onClick={() => setShowInlineToolPicker(false)}
-                              style={{
-                                background: "none", border: "none", color: TEXT_LIGHT,
-                                fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                                padding: "3px 4px",
-                              }}
-                            >
-                              Done
-                            </button>
-                          </div>
-                        )}
+                      <div style={{
+                        display: "inline-flex", borderRadius: 20, overflow: "hidden",
+                        border: `1.5px solid ${BORDER}`, background: "#F7F6F3",
+                      }}>
+                        <button
+                          onClick={() => setExecutionMode("byo")}
+                          style={{
+                            padding: "5px 14px", border: "none", cursor: "pointer",
+                            fontSize: 12, fontWeight: executionMode === "byo" ? 600 : 400,
+                            fontFamily: "'DM Sans', sans-serif",
+                            background: executionMode === "byo" ? "#E8F0FE" : "transparent",
+                            color: executionMode === "byo" ? "#1967D2" : TEXT_LIGHT,
+                            transition: "all 0.2s",
+                            borderRight: `1px solid ${BORDER}`,
+                          }}
+                        >
+                          {executionMode === "byo" && (byoKeys.anthropic || byoKeys.google || byoKeys.openai) ? "My API Key" : "BYO"}
+                        </button>
+                        <button
+                          onClick={() => setExecutionMode("api")}
+                          style={{
+                            padding: "5px 14px", border: "none", cursor: "pointer",
+                            fontSize: 12, fontWeight: executionMode === "api" ? 600 : 400,
+                            fontFamily: "'DM Sans', sans-serif",
+                            background: executionMode === "api" ? `${PRIMARY}18` : "transparent",
+                            color: executionMode === "api" ? PRIMARY : TEXT_LIGHT,
+                            transition: "all 0.2s",
+                          }}
+                        >
+                          Our API
+                        </button>
                       </div>
                     )}
                   </div>

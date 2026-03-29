@@ -72,9 +72,12 @@ export function DagView({
   onRunAgent,
   onAddNote,
   projectSummary,
+  projectTitle,
+  projectBrief,
   doneSubtaskIds,
   onToggleSubtask,
   allTasks,
+  taskOutputs,
   executionMode = "api",
   userTools,
   onEditTask,
@@ -93,9 +96,12 @@ export function DagView({
   onRunAgent: (task: Task, force?: boolean) => void;
   onAddNote: (id: string, note: string) => void;
   projectSummary: string;
+  projectTitle?: string;
+  projectBrief?: string;
   doneSubtaskIds: Set<string>;
   onToggleSubtask: (id: string) => void;
   allTasks: Task[];
+  taskOutputs?: Record<string, string>;
   executionMode?: ExecutionMode;
   userTools?: UserToolConfig;
   onEditTask?: (id: string, updates: { title?: string; description?: string; assignee?: Assignee; agent_type?: AgentType }) => void;
@@ -111,18 +117,47 @@ export function DagView({
   // Build prior results from completed tasks
   const buildPriorResults = (): PriorResult[] => {
     return allTasks
-      .filter((t) => results[t.id]?.done)
+      .filter((t) => results[t.id]?.done || (doneIds && doneIds.has(t.id)))
       .map((t) => ({
         title: t.title,
         assignee: t.assignee,
-        output: results[t.id]?.finalOutput || results[t.id]?.steps
+        output: (taskOutputs && taskOutputs[t.id]) || results[t.id]?.finalOutput || results[t.id]?.steps
           ?.filter((s) => s.type === "output")
           .map((s) => s.type === "output" ? s.content : "")
-          .join("\n") || "",
+          .join("\n") || t.notes || "",
       }));
   };
 
   const priorResults = buildPriorResults();
+
+  // Helper: compute dependency outputs for a task
+  const getDependencyOutputs = (task: Task) => {
+    if (!task.depends_on || task.depends_on.length === 0) return [];
+    return task.depends_on
+      .filter((depId) => {
+        const depTask = allTasks.find((t) => t.id === depId);
+        return depTask && ((taskOutputs && taskOutputs[depId]) || depTask?.notes);
+      })
+      .map((depId) => {
+        const depTask = allTasks.find((t) => t.id === depId)!;
+        return {
+          id: depId,
+          title: depTask.title,
+          output: (taskOutputs && taskOutputs[depId]) || depTask.notes || "",
+        };
+      });
+  };
+
+  // Helper: get sibling tasks (other tasks in same parallel group)
+  const getSiblingTasks = (task: Task): Task[] => {
+    for (const node of nodes) {
+      if (node.type === "parallel_group") {
+        const isChild = node.children.some((c) => c.id === task.id);
+        if (isChild) return node.children.filter((c) => c.id !== task.id);
+      }
+    }
+    return [];
+  };
 
   const matchesFilters = (t: Task) => {
     if (energyFilter !== "all" && t.energy !== energyFilter) return false;
@@ -199,9 +234,13 @@ export function DagView({
                 onRunAgent={onRunAgent}
                 onAddNote={onAddNote}
                 projectSummary={projectSummary}
+                projectTitle={projectTitle}
+                projectBrief={projectBrief}
                 doneSubtaskIds={doneSubtaskIds}
                 onToggleSubtask={onToggleSubtask}
                 priorResults={priorResults}
+                dependencyOutputs={getDependencyOutputs(node)}
+                siblingTasks={getSiblingTasks(node)}
                 allTasksList={allTasks}
                 executionMode={executionMode}
                 userTools={userTools}
@@ -245,9 +284,13 @@ export function DagView({
                     onRunAgent={onRunAgent}
                     onAddNote={onAddNote}
                     projectSummary={projectSummary}
+                    projectTitle={projectTitle}
+                    projectBrief={projectBrief}
                     doneSubtaskIds={doneSubtaskIds}
                     onToggleSubtask={onToggleSubtask}
                     priorResults={priorResults}
+                    dependencyOutputs={getDependencyOutputs(child)}
+                    siblingTasks={node.children.filter((c) => c.id !== child.id)}
                     allTasksList={allTasks}
                     executionMode={executionMode}
                     userTools={userTools}

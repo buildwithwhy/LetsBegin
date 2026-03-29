@@ -7,7 +7,7 @@ import { Task, Subtask, DagNode, Energy, Assignee, AgentType, ActivityEvent, Tas
 import { AgentResult, AgentStep } from "@/hooks/useAgentExecutor";
 import { AgentPanel } from "@/components/AgentPanel";
 import { SubtaskList, SubtaskItem } from "@/components/SubtaskList";
-import { TaskChat } from "@/components/TaskChat";
+import { TaskChat, type DependencyOutput } from "@/components/TaskChat";
 import { ByoAgentPanel } from "@/components/ByoAgentPanel";
 import { formatDuration } from "@/lib/utils";
 
@@ -97,6 +97,77 @@ function ActivityLog({ activity }: { activity?: ActivityEvent[] }) {
   );
 }
 
+// ─── PriorWorkSection ───
+
+function PriorWorkSection({ dependencyOutputs }: { dependencyOutputs: DependencyOutput[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+
+  const toggleItem = (id: string) => {
+    setExpandedItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  return (
+    <div style={{
+      marginBottom: 10,
+      border: `1px solid ${BORDER}`,
+      borderRadius: 8,
+      overflow: "hidden",
+    }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          width: "100%",
+          padding: "6px 10px",
+          background: "#F0EFEB",
+          border: "none",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 11,
+          fontWeight: 600,
+          color: TEXT_LIGHT,
+          fontFamily: "'DM Sans', sans-serif",
+        }}
+      >
+        <span style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s", display: "inline-block" }}>&#x25B6;</span>
+        This builds on {dependencyOutputs.length} completed task{dependencyOutputs.length !== 1 ? "s" : ""}
+      </button>
+      {expanded && (
+        <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+          {dependencyOutputs.map((dep) => {
+            const isItemExpanded = expandedItems.has(dep.id);
+            const preview = dep.output.slice(0, 100) + (dep.output.length > 100 ? "..." : "");
+            return (
+              <div key={dep.id} style={{ fontSize: 12, color: TEXT, lineHeight: 1.5 }}>
+                <div style={{ fontWeight: 600, marginBottom: 2 }}>{dep.title}</div>
+                <div
+                  style={{ color: "#787774", cursor: dep.output.length > 100 ? "pointer" : "default" }}
+                  onClick={() => dep.output.length > 100 && toggleItem(dep.id)}
+                >
+                  {isItemExpanded ? dep.output : preview}
+                  {dep.output.length > 100 && !isItemExpanded && (
+                    <span style={{ color: PRIMARY, marginLeft: 4, fontSize: 11 }}>show more</span>
+                  )}
+                  {dep.output.length > 100 && isItemExpanded && (
+                    <span style={{ color: PRIMARY, marginLeft: 4, fontSize: 11 }}>show less</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── TaskCard ───
 
 export function TaskCard({
@@ -106,10 +177,14 @@ export function TaskCard({
   onRunAgent,
   onAddNote,
   projectSummary,
+  projectTitle,
+  projectBrief,
   autoExpandSubtasks = false,
   doneSubtaskIds,
   onToggleSubtask,
   priorResults,
+  dependencyOutputs,
+  siblingTasks,
   allTasksList,
   executionMode = "api",
   userTools,
@@ -126,10 +201,14 @@ export function TaskCard({
   onRunAgent: (task: Task, force?: boolean) => void;
   onAddNote: (id: string, note: string) => void;
   projectSummary: string;
+  projectTitle?: string;
+  projectBrief?: string;
   autoExpandSubtasks?: boolean;
   doneSubtaskIds: Set<string>;
   onToggleSubtask: (id: string) => void;
   priorResults: PriorResult[];
+  dependencyOutputs?: DependencyOutput[];
+  siblingTasks?: Task[];
   allTasksList?: Task[];
   executionMode?: ExecutionMode;
   userTools?: UserToolConfig;
@@ -564,6 +643,11 @@ export function TaskCard({
         </div>
       )}
 
+      {/* Prior work / dependency outputs */}
+      {dependencyOutputs && dependencyOutputs.length > 0 && (
+        <PriorWorkSection dependencyOutputs={dependencyOutputs} />
+      )}
+
       {/* File attachments */}
       <div style={{ marginBottom: attachments.length > 0 ? 8 : 0 }}>
         <input
@@ -727,99 +811,14 @@ export function TaskCard({
         </div>
       )}
       {isPending && !result && task.assignee === "agent" && executionMode === "byo" && (
-        <>
-          {userTools && userTools.available.length > 1 && (
-            <div style={{ position: "relative", marginBottom: 8 }}>
-              <button
-                onClick={() => setShowToolPicker(!showToolPicker)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  padding: "3px 10px",
-                  borderRadius: 99,
-                  border: `1px solid ${toolOverride ? PRIMARY : BORDER}`,
-                  background: toolOverride ? `${PRIMARY}12` : "transparent",
-                  color: toolOverride ? PRIMARY : TEXT_LIGHT,
-                  fontSize: 11,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  fontFamily: "'DM Sans', sans-serif",
-                }}
-              >
-                {effectiveRouting?.icon} {effectiveRouting?.label}
-                <span style={{ fontSize: 9, marginLeft: 2 }}>{showToolPicker ? "\u25B2" : "\u25BC"}</span>
-              </button>
-              {showToolPicker && (
-                <div style={{
-                  position: "absolute",
-                  top: "100%",
-                  left: 0,
-                  marginTop: 4,
-                  background: SURFACE,
-                  border: `1px solid ${BORDER}`,
-                  borderRadius: 8,
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-                  zIndex: 10,
-                  minWidth: 160,
-                  overflow: "hidden",
-                }}>
-                  {/* Auto option to reset */}
-                  <div
-                    onClick={() => { setToolOverride(null); setShowToolPicker(false); }}
-                    style={{
-                      padding: "7px 12px",
-                      fontSize: 11,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      background: !toolOverride ? `${PRIMARY}08` : "transparent",
-                      color: !toolOverride ? PRIMARY : TEXT,
-                      fontWeight: !toolOverride ? 600 : 400,
-                      fontFamily: "'DM Sans', sans-serif",
-                    }}
-                  >
-                    {taskRouting?.icon} {taskRouting?.label} <span style={{ color: TEXT_LIGHT, fontSize: 10 }}>(auto)</span>
-                  </div>
-                  {userTools.available
-                    .filter((t) => t !== taskRouting?.tool)
-                    .map((tool) => {
-                      const cap = TOOL_CAPABILITIES[tool];
-                      const isSelected = toolOverride === tool;
-                      return (
-                        <div
-                          key={tool}
-                          onClick={() => { setToolOverride(tool); setShowToolPicker(false); }}
-                          style={{
-                            padding: "7px 12px",
-                            fontSize: 11,
-                            cursor: "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            background: isSelected ? `${PRIMARY}08` : "transparent",
-                            color: isSelected ? PRIMARY : TEXT,
-                            fontWeight: isSelected ? 600 : 400,
-                            fontFamily: "'DM Sans', sans-serif",
-                          }}
-                        >
-                          {cap.icon} {cap.label}
-                        </div>
-                      );
-                    })}
-                </div>
-              )}
-            </div>
-          )}
-          <ByoAgentPanel
-            task={task}
-            projectContext={projectSummary}
-            priorResults={priorResults}
-            onComplete={onMarkDone}
-            routing={effectiveRouting}
-          />
-        </>
+        <ByoAgentPanel
+          task={task}
+          projectContext={projectSummary}
+          priorResults={priorResults}
+          dependencyOutputs={dependencyOutputs}
+          onComplete={onMarkDone}
+          routing={effectiveRouting}
+        />
       )}
       {isPending && !result && task.assignee === "hybrid" && executionMode === "api" && (
         <button
@@ -840,98 +839,14 @@ export function TaskCard({
         </button>
       )}
       {isPending && !result && task.assignee === "hybrid" && executionMode === "byo" && (
-        <>
-          {userTools && userTools.available.length > 1 && (
-            <div style={{ position: "relative", marginBottom: 8 }}>
-              <button
-                onClick={() => setShowToolPicker(!showToolPicker)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  padding: "3px 10px",
-                  borderRadius: 99,
-                  border: `1px solid ${toolOverride ? PRIMARY : BORDER}`,
-                  background: toolOverride ? `${PRIMARY}12` : "transparent",
-                  color: toolOverride ? PRIMARY : TEXT_LIGHT,
-                  fontSize: 11,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  fontFamily: "'DM Sans', sans-serif",
-                }}
-              >
-                {effectiveRouting?.icon} {effectiveRouting?.label}
-                <span style={{ fontSize: 9, marginLeft: 2 }}>{showToolPicker ? "\u25B2" : "\u25BC"}</span>
-              </button>
-              {showToolPicker && (
-                <div style={{
-                  position: "absolute",
-                  top: "100%",
-                  left: 0,
-                  marginTop: 4,
-                  background: SURFACE,
-                  border: `1px solid ${BORDER}`,
-                  borderRadius: 8,
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-                  zIndex: 10,
-                  minWidth: 160,
-                  overflow: "hidden",
-                }}>
-                  <div
-                    onClick={() => { setToolOverride(null); setShowToolPicker(false); }}
-                    style={{
-                      padding: "7px 12px",
-                      fontSize: 11,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      background: !toolOverride ? `${PRIMARY}08` : "transparent",
-                      color: !toolOverride ? PRIMARY : TEXT,
-                      fontWeight: !toolOverride ? 600 : 400,
-                      fontFamily: "'DM Sans', sans-serif",
-                    }}
-                  >
-                    {taskRouting?.icon} {taskRouting?.label} <span style={{ color: TEXT_LIGHT, fontSize: 10 }}>(auto)</span>
-                  </div>
-                  {userTools.available
-                    .filter((t) => t !== taskRouting?.tool)
-                    .map((tool) => {
-                      const cap = TOOL_CAPABILITIES[tool];
-                      const isSelected = toolOverride === tool;
-                      return (
-                        <div
-                          key={tool}
-                          onClick={() => { setToolOverride(tool); setShowToolPicker(false); }}
-                          style={{
-                            padding: "7px 12px",
-                            fontSize: 11,
-                            cursor: "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            background: isSelected ? `${PRIMARY}08` : "transparent",
-                            color: isSelected ? PRIMARY : TEXT,
-                            fontWeight: isSelected ? 600 : 400,
-                            fontFamily: "'DM Sans', sans-serif",
-                          }}
-                        >
-                          {cap.icon} {cap.label}
-                        </div>
-                      );
-                    })}
-                </div>
-              )}
-            </div>
-          )}
-          <ByoAgentPanel
-            task={task}
-            projectContext={projectSummary}
-            priorResults={priorResults}
-            onComplete={onMarkDone}
-            routing={effectiveRouting}
-          />
-        </>
+        <ByoAgentPanel
+          task={task}
+          projectContext={projectSummary}
+          priorResults={priorResults}
+          dependencyOutputs={dependencyOutputs}
+          onComplete={onMarkDone}
+          routing={effectiveRouting}
+        />
       )}
       {isPending && !result && task.assignee === "user" && (
         <div>
@@ -1016,7 +931,7 @@ export function TaskCard({
       )}
 
       {isPending && (task.assignee === "user" || task.assignee === "hybrid") && (
-        <TaskChat task={task} projectSummary={projectSummary} priorResults={priorResults} allTasks={allTasksList} doneIds={doneIds} currentNodes={currentNodes} byoKeys={byoKeys} />
+        <TaskChat task={task} projectTitle={projectTitle} projectBrief={projectBrief} projectSummary={projectSummary} priorResults={priorResults} dependencyContext={dependencyOutputs} siblingTasks={siblingTasks} allTasks={allTasksList} doneIds={doneIds} currentNodes={currentNodes} byoKeys={byoKeys} />
       )}
 
       {/* ─── Hybrid two-phase handoff ─── */}
