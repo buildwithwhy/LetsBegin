@@ -64,6 +64,7 @@ export default function Home() {
   const [elapsed, setElapsed] = useState(0);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
+  const [taskOutputs, setTaskOutputs] = useState<Record<string, string>>({});
   const [energyFilter, setEnergyFilter] = useState<Energy | "all">("all");
   const [assigneeFilter, setAssigneeFilter] = useState<Assignee | "all">("all");
   const [doneSubtaskIds, setDoneSubtaskIds] = useState<Set<string>>(new Set());
@@ -104,6 +105,25 @@ export default function Home() {
   const [focusCategory, setFocusCategory] = useState<TaskCategory | "all">("all");
   const [detourDismissed, setDetourDismissed] = useState(false);
 
+  // Brain Fry awareness state
+  const [aiInteractionCount, setAiInteractionCount] = useState(0);
+  const [showBrainFryOverlay, setShowBrainFryOverlay] = useState(false);
+  const [brainFryDismissed, setBrainFryDismissed] = useState(false);
+  const [sessionStartTime] = useState<number>(() => Date.now());
+  const [sessionBreakShown, setSessionBreakShown] = useState(false);
+  const [showSessionBreak, setShowSessionBreak] = useState(false);
+  const [lastSessionBreakAt, setLastSessionBreakAt] = useState<number | null>(null);
+  const [showBatchReview, setShowBatchReview] = useState(false);
+  const [brainFryPaused, setBrainFryPaused] = useState(false);
+
+  // Quick Capture state
+  const [quickCapture, setQuickCapture] = useState("");
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [quickCaptureToast, setQuickCaptureToast] = useState<string | null>(null);
+
+  // Catch-up panel state
+  const [showCatchUp, setShowCatchUp] = useState(false);
+
   // Onboarding state
   const [hasOnboarded, setHasOnboarded] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
@@ -139,9 +159,6 @@ export default function Home() {
   const [byoJsonError, setByoJsonError] = useState("");
   const [byoClarifyActive, setByoClarifyActive] = useState(false);
   const [byoPlanActive, setByoPlanActive] = useState(false);
-  const [byoCopied, setByoCopied] = useState(false);
-  const [byoOpenedTool, setByoOpenedTool] = useState<string | null>(null);
-  const [byoWaitingForResult, setByoWaitingForResult] = useState(false);
   const [showMcpSetup, setShowMcpSetup] = useState(false);
   const [mcpCopiedStep, setMcpCopiedStep] = useState<string | null>(null);
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://your-project.supabase.co";
@@ -285,6 +302,48 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalFocusMode]);
 
+  // Brain Fry: helper to track AI interactions
+  const trackAiInteraction = useCallback(() => {
+    setAiInteractionCount((prev) => {
+      const next = prev + 1;
+      if (next >= 21 && !brainFryDismissed) {
+        setShowBrainFryOverlay(true);
+      }
+      return next;
+    });
+  }, [brainFryDismissed]);
+
+  // Session break reminder: 90 min initial, then every 45 min
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const elapsedMs = now - sessionStartTime;
+      const NINETY_MIN = 90 * 60 * 1000;
+      const FORTY_FIVE_MIN = 45 * 60 * 1000;
+
+      if (!sessionBreakShown && elapsedMs >= NINETY_MIN) {
+        setShowSessionBreak(true);
+        setSessionBreakShown(true);
+        setLastSessionBreakAt(now);
+      } else if (sessionBreakShown && lastSessionBreakAt) {
+        const sinceLast = now - lastSessionBreakAt;
+        if (sinceLast >= FORTY_FIVE_MIN) {
+          setShowSessionBreak(true);
+          setLastSessionBreakAt(now);
+        }
+      }
+    }, 30000); // check every 30s
+    return () => clearInterval(interval);
+  }, [sessionStartTime, sessionBreakShown, lastSessionBreakAt]);
+
+  // Brain Fry score helper
+  const brainFryLevel = useMemo(() => {
+    if (aiInteractionCount <= 5) return { label: "Fresh \uD83E\uDDE0", color: "#2DA44E", bg: "#2DA44E14" };
+    if (aiInteractionCount <= 12) return { label: "Warming up", color: "#D4A72C", bg: "#D4A72C14" };
+    if (aiInteractionCount <= 20) return { label: "Getting hot", color: "#E8590C", bg: "#E8590C14" };
+    return { label: "Brain fry alert \u2014 take a break", color: "#CF222E", bg: "#CF222E14" };
+  }, [aiInteractionCount]);
+
   // Compute cross-project recommended tasks for "Your Day"
   const yourDayTasks = useMemo(() => {
     if (savedPlans.length === 0) return [];
@@ -329,6 +388,20 @@ export default function Home() {
       if (dayEnergy && a.task.energy === dayEnergy) aBonus += 15;
       if (dayEnergy && b.task.energy === dayEnergy) bBonus += 15;
 
+      // Low-Brain Mode: strongly prefer easy, no-AI, review-type tasks
+      if (dayEnergy === "low") {
+        if (a.task.assignee === "user") aBonus += 25;
+        if (b.task.assignee === "user") bBonus += 25;
+        if (a.task.energy === "low") aBonus += 20;
+        if (b.task.energy === "low") bBonus += 20;
+        if (a.task.title.toLowerCase().includes("review")) aBonus += 15;
+        if (b.task.title.toLowerCase().includes("review")) bBonus += 15;
+        const aSubCount = a.task.subtasks?.length || 0;
+        const bSubCount = b.task.subtasks?.length || 0;
+        if (aSubCount <= 2) aBonus += 10;
+        if (bSubCount <= 2) bBonus += 10;
+      }
+
       return (b.score + bBonus) - (a.score + aBonus);
     });
 
@@ -344,6 +417,15 @@ export default function Home() {
     });
     setDoneIds(new Set(saved.done_ids));
     setDoneSubtaskIds(new Set(saved.done_subtask_ids));
+    // Rebuild taskOutputs from saved task notes
+    const rebuiltOutputs: Record<string, string> = {};
+    const rebuildTasks = getAllTasks(saved.nodes);
+    for (const t of rebuildTasks) {
+      if (saved.done_ids.includes(t.id) && t.notes) {
+        rebuiltOutputs[t.id] = t.notes;
+      }
+    }
+    setTaskOutputs(rebuiltOutputs);
     setSavedPlanId(saved.id);
     setProjectPriority(saved.priority || "medium");
     setFocusCategory("all");
@@ -376,6 +458,7 @@ export default function Home() {
     setBrief("");
     setPlan(null);
     setDoneIds(new Set());
+    setTaskOutputs({});
     setDoneSubtaskIds(new Set());
     setSavedPlanId(null);
     setJustMeMode(false);
@@ -392,6 +475,41 @@ export default function Home() {
     setStep("dashboard");
   }, []);
 
+  // Quick Capture: add a thought as a task to a project
+  const addQuickCapture = useCallback(async (projectId: string) => {
+    const sp = savedPlans.find((p) => p.id === projectId);
+    if (!sp || !quickCapture.trim()) return;
+
+    const newTask: Task = {
+      id: `quick-${Date.now()}`,
+      type: "task",
+      title: quickCapture.trim(),
+      description: "",
+      assignee: "user",
+      energy: "low",
+      status: "pending",
+      depends_on: [],
+    };
+
+    const updatedNodes: DagNode[] = [...sp.nodes, newTask];
+    const updatedPlan: Plan = {
+      project_title: sp.project_title,
+      summary: sp.summary,
+      nodes: updatedNodes,
+    };
+
+    await savePlan(sp.brief, updatedPlan, new Set(sp.done_ids || []), new Set(sp.done_subtask_ids || []), sp.priority || "medium");
+
+    // Reload plans to reflect changes
+    const plans = await loadPlans();
+    setSavedPlans(plans);
+
+    setQuickCapture("");
+    setShowProjectPicker(false);
+    setQuickCaptureToast(sp.project_title || "Untitled");
+    setTimeout(() => setQuickCaptureToast(null), 3000);
+  }, [savedPlans, quickCapture, savePlan, loadPlans]);
+
   // Elapsed timer for compiling phase
   useEffect(() => {
     if (compileStartTime === null) return;
@@ -406,6 +524,38 @@ export default function Home() {
   const doneCount = allTasks.filter((t) => doneIds.has(t.id)).length;
 
   const currentNodes = plan ? computeUnlocked(plan.nodes, doneIds) : [];
+
+  // Helper: compute dependency outputs for a task
+  const getDependencyOutputs = useCallback((task: Task) => {
+    if (!task.depends_on || task.depends_on.length === 0) return [];
+    return task.depends_on
+      .filter((depId) => {
+        const depTask = allTasks.find((t) => t.id === depId);
+        return depTask && (taskOutputs[depId] || depTask?.notes);
+      })
+      .map((depId) => {
+        const depTask = allTasks.find((t) => t.id === depId)!;
+        return {
+          id: depId,
+          title: depTask.title,
+          output: taskOutputs[depId] || depTask.notes || "",
+        };
+      });
+  }, [allTasks, taskOutputs]);
+
+  // Helper: get sibling tasks (other tasks at the same level in a parallel group)
+  const getSiblingTasks = useCallback((task: Task): Task[] => {
+    if (!plan) return [];
+    for (const node of plan.nodes) {
+      if (node.type === "parallel_group") {
+        const isChild = node.children.some((c) => c.id === task.id);
+        if (isChild) {
+          return node.children.filter((c) => c.id !== task.id);
+        }
+      }
+    }
+    return [];
+  }, [plan]);
 
   // Welcome-back recap data
   const welcomeBackData = useMemo(() => {
@@ -476,6 +626,10 @@ export default function Home() {
         next.add(id);
         return next;
       });
+      // Store task output/notes for context carry-forward
+      if (notes) {
+        setTaskOutputs((prev) => ({ ...prev, [id]: notes }));
+      }
       // Update plan with completion timestamp, notes, and activity
       setPlan((prev) => {
         if (!prev) return prev;
@@ -615,12 +769,20 @@ export default function Home() {
   // Track which agent tasks we've already kicked off
   const launchedAgentTasks = useRef<Set<string>>(new Set());
 
-  // Auto-complete agent tasks when result is done
+  // Auto-complete agent tasks when result is done and capture their output
   useEffect(() => {
     for (const [taskId, result] of Object.entries(results)) {
       if (result.done && !result.error) {
         const task = allTasks.find((t) => t.id === taskId);
         if (task && task.assignee === "agent" && !doneIds.has(taskId)) {
+          // Capture agent output for context carry-forward
+          const agentOutput = result.finalOutput || result.steps
+            ?.filter((s) => s.type === "output")
+            .map((s) => s.type === "output" ? s.content : "")
+            .join("\n") || "";
+          if (agentOutput) {
+            setTaskOutputs((prev) => ({ ...prev, [taskId]: agentOutput }));
+          }
           markDone(taskId);
         }
       }
@@ -675,6 +837,7 @@ export default function Home() {
         // Stagger launches slightly to avoid hammering the API
         const agentType = task.agent_type;
         setTimeout(() => {
+          trackAiInteraction();
           execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee, false, agentType);
         }, launchedAgentTasks.current.size * 500);
       }
@@ -699,12 +862,14 @@ export default function Home() {
         ),
       };
     });
+    trackAiInteraction();
     execute(task.id, task.title, task.description, plan?.summary || brief, task.assignee, force, task.agent_type);
   };
 
   const handleDecompose = useCallback(async (taskId: string, granularity: "normal" | "detailed" | "tiny") => {
     const task = allTasks.find((t) => t.id === taskId);
     if (!task || !plan) return;
+    trackAiInteraction();
 
     const res = await fetch("/api/decompose", {
       method: "POST",
@@ -764,50 +929,6 @@ export default function Home() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // Tool URL map for "Open in [Tool]" buttons
-  const TOOL_URLS: Partial<Record<UserTool, string>> = {
-    "claude-cowork": "https://claude.ai/new",
-    "claude-max": "https://claude.ai/new",
-    "chatgpt-plus": "https://chatgpt.com",
-    "gemini-pro": "https://gemini.google.com/app",
-  };
-
-  const getPreferredByoTool = (): { tool: UserTool; cap: typeof TOOL_CAPABILITIES[UserTool]; url: string | null } | null => {
-    // Prefer the user's preferred tool, then first non-API non-claude-code tool
-    const candidates = userTools.preferred
-      ? [userTools.preferred, ...userTools.available.filter(t => t !== userTools.preferred)]
-      : userTools.available;
-    for (const t of candidates) {
-      if (!TOOL_CAPABILITIES[t].isApi && t !== "claude-code") {
-        return { tool: t, cap: TOOL_CAPABILITIES[t], url: TOOL_URLS[t] || null };
-      }
-    }
-    // If no web tool, return first available for label purposes
-    if (candidates.length > 0) {
-      const t = candidates[0];
-      return { tool: t, cap: TOOL_CAPABILITIES[t], url: TOOL_URLS[t] || null };
-    }
-    return null;
-  };
-
-  const handleOpenInTool = (prompt: string) => {
-    const info = getPreferredByoTool();
-    navigator.clipboard.writeText(prompt).then(() => {
-      setByoCopied(true);
-      if (info?.url) {
-        setByoOpenedTool(info.cap.label);
-        window.open(info.url, "_blank");
-        setByoWaitingForResult(true);
-        setTimeout(() => {
-          setByoCopied(false);
-          setByoOpenedTool(null);
-        }, 3000);
-      } else {
-        setTimeout(() => setByoCopied(false), 2000);
-      }
-    });
-  };
-
   // Check if user has a relevant BYOK key for direct API calls
   const getRelevantByoKey = (): { provider: string; key: string; header: string } | null => {
     if (byoKeys.anthropic) return { provider: "Anthropic", key: byoKeys.anthropic, header: "x-user-anthropic-key" };
@@ -820,15 +941,22 @@ export default function Home() {
     setClarifyError("");
     setQuestionIndex(0);
     setStep("clarify");
-    setByoJsonInput("");
-    setByoJsonError("");
+
+    // BYO mode without API keys: show message to add keys
+    const byokKey = getRelevantByoKey();
+    if (executionMode === "byo" && !byokKey) {
+      setByoClarifyActive(true);
+      setClarifyLoading(false);
+      setQuestions([]);
+      return;
+    }
 
     // BYO mode with BYOK key: call API directly with user's key
-    const byokKey = getRelevantByoKey();
-    if (executionMode === "byo" && userTools.available.length > 0 && byokKey) {
+    if (executionMode === "byo" && byokKey) {
       setByoClarifyActive(false);
       setByokDirectLoading(true);
       setClarifyLoading(true);
+      trackAiInteraction();
       try {
         const res = await fetch("/api/clarify", {
           method: "POST",
@@ -867,29 +995,10 @@ export default function Home() {
       return;
     }
 
-    // BYO mode: show prompt for user to copy to their AI
-    if (executionMode === "byo" && userTools.available.length > 0) {
-      const prompt = `I'm planning a project: "${brief}"
-
-Generate 3-5 clarifying questions to ask me before planning. For each question, provide:
-- An id (short slug)
-- The question text
-- Type: "yes_no", "choice", or "short"
-- Options array (for choice type only)
-
-Return as JSON: { "questions": [{ "id": "...", "question": "...", "type": "...", "options": [...] }] }`;
-      setByoClarifyPrompt(prompt);
-      setByoClarifyActive(true);
-      setClarifyLoading(false);
-      setQuestions([]);
-      setByoWaitingForResult(false);
-      setByoOpenedTool(null);
-      return;
-    }
-
     // API mode: call our API
     setByoClarifyActive(false);
     setClarifyLoading(true);
+    trackAiInteraction();
     try {
       const res = await fetch("/api/clarify", {
         method: "POST",
@@ -958,6 +1067,7 @@ Return as JSON: { "questions": [{ "id": "...", "question": "...", "type": "...",
     setByoClarifyActive(false);
     setClarifyLoading(true);
     setClarifyError("");
+    trackAiInteraction();
     try {
       const res = await fetch("/api/clarify", {
         method: "POST",
@@ -1054,6 +1164,7 @@ Return as JSON: { "questions": [{ "id": "...", "question": "...", "type": "...",
       const unlockedNodes = computeUnlocked(receivedPlan.nodes, new Set());
       setPlan({ ...receivedPlan, nodes: unlockedNodes });
       setDoneIds(new Set());
+      setTaskOutputs({});
       setDoneSubtaskIds(new Set());
       setByoPlanActive(false);
       setStep("reveal");
@@ -1069,6 +1180,7 @@ Return as JSON: { "questions": [{ "id": "...", "question": "...", "type": "...",
     setThinkingText("");
     setCompileStatus("Thinking through your brief...");
     setElapsed(0);
+    trackAiInteraction();
 
     const enrichedBrief = buildEnrichedBrief();
 
@@ -1191,6 +1303,7 @@ Return as JSON: { "questions": [{ "id": "...", "question": "...", "type": "...",
       setByoPlanActive(false);
       setByokDirectLoading(true);
       setCompileStartTime(Date.now());
+      trackAiInteraction();
 
       try {
         const res = await fetch("/api/compile", {
@@ -1285,93 +1398,8 @@ Return as JSON: { "questions": [{ "id": "...", "question": "...", "type": "...",
       return;
     }
 
-    // BYO mode: show prompt for user to copy to their AI
-    if (executionMode === "byo" && userTools.available.length > 0) {
-      const todayDate = new Date().toISOString().split("T")[0];
-      const prompt = `You are a project planning assistant. A user has given you this project brief:
-
-"${enrichedBrief}"
-
-Generate a structured project plan as a DAG (directed acyclic graph) of tasks.
-
-Rules:
-- Each task needs a unique id (use short slugs like "setup-account", "draft-description")
-- The "type" field must be exactly "task" for individual tasks or "parallel_group" for groups of parallel tasks
-- depends_on lists the ids of tasks that must complete before this task can start
-- The first task(s) should have an empty depends_on array
-- Use parallel_group to group tasks that can run simultaneously (they share the same dependencies)
-- Children inside a parallel_group can depend on tasks outside the group (via the group's depends_on) but should not depend on each other
-- All tasks must have status: "pending" (the system will compute locked/unlocked states)
-- assignee is "agent" (AI can fully automate), "user" (human must do it), or "hybrid" (agent drafts, human reviews)
-- energy is "high" (significant effort), "medium" (moderate effort), or "low" (quick task)
-- Do NOT include subtasks — keep this lean
-
-AGENT TYPE ASSIGNMENT:
-For tasks with assignee "agent" or "hybrid", set agent_type:
-- "claude-code": Tasks that need real coding, implementation, debugging, complex reasoning, or working with code repositories.
-- "builtin": Simpler agent tasks — drafting content, researching, generating text, filling templates.
-- Leave agent_type undefined for "user" tasks.
-
-CRITICAL — DEPENDENCY RULES:
-A dependency (depends_on) means: "this task LITERALLY CANNOT START without the OUTPUT of that task." Not "it would be nice to do first" — it means IMPOSSIBLE without it.
-
-For EVERY dependency you add, ask: "What specific output from task A does task B need?" If you can't name it, there is no dependency.
-
-CROSS-TYPE DEPENDENCIES (most important):
-- Agent tasks CAN depend on user tasks IF the agent needs something only the human can provide
-- User tasks CAN depend on agent tasks IF the user needs the agent's output to act
-- But MOST agent tasks and user tasks are INDEPENDENT and should run in parallel
-
-NEVER DO THIS:
-- Serial chain where everything depends on the previous task
-- Agent task waiting on a user task when it doesn't need the user's output
-- Marking tasks as dependent just because they're in the same topic area
-
-ALWAYS DO THIS:
-- Multiple tasks with empty depends_on (things that can start immediately)
-- Use parallel_group for tasks with identical dependencies
-- Let agents and humans work simultaneously whenever their tasks are independent
-
-SCHEDULING INTELLIGENCE — WAIT TIMES:
-For any task where completion triggers a WAIT before the next step can happen, set:
-- has_wait_after: true
-- wait_type: "response", "build", "approval", "processing", "shipping", or "other"
-- estimated_wait: "minutes", "hours", "days", or "weeks"
-
-DEADLINES:
-If the user mentions any deadlines, due dates, or time constraints, tag tasks with a \`deadline\` ISO date string. Today's date is ${todayDate}. Only set deadline on tasks that actually have time constraints.
-
-TASK CATEGORIES:
-Tag each task with a \`category\` from: coding, writing, emails, research, errands, calls, planning, review.
-
-Return as JSON with this structure:
-{
-  "project_title": "Short project title",
-  "summary": "1-2 sentence summary",
-  "nodes": [
-    {
-      "type": "task",
-      "id": "slug-id",
-      "title": "Task title",
-      "description": "What to do",
-      "status": "pending",
-      "assignee": "user" | "agent" | "hybrid",
-      "agent_type": "claude-code" | "builtin",
-      "energy": "high" | "medium" | "low",
-      "category": "coding" | "writing" | "emails" | "research" | "errands" | "calls" | "planning" | "review",
-      "depends_on": ["other-task-id"]
-    },
-    {
-      "type": "parallel_group",
-      "id": "group-id",
-      "depends_on": ["other-task-id"],
-      "children": [ ...tasks... ]
-    }
-  ]
-}
-
-Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the dependency graph is valid — no circular dependencies, and every id referenced in depends_on must exist.`;
-      setByoPlanPrompt(prompt);
+    // BYO mode without API keys: show message to add keys
+    if (executionMode === "byo" && !byokKey) {
       setByoPlanActive(true);
       setCompileStartTime(null);
       return;
@@ -1380,6 +1408,7 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
     // API mode
     setByoPlanActive(false);
     setCompileStartTime(Date.now());
+    trackAiInteraction();
 
     try {
       const res = await fetch("/api/compile", {
@@ -1484,12 +1513,204 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
         {/* ─── DASHBOARD ─── */}
         {(user || !authConfigured) && step === "dashboard" && (
           <div>
+            {/* ─── BRAIN FRY INDICATOR ─── */}
+            {aiInteractionCount > 0 && (
+              <div style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "4px 12px",
+                borderRadius: 16,
+                background: brainFryLevel.bg,
+                border: `1px solid ${brainFryLevel.color}30`,
+                fontSize: 12,
+                fontWeight: 600,
+                color: brainFryLevel.color,
+                marginBottom: 12,
+              }}>
+                <span style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  background: brainFryLevel.color,
+                  display: "inline-block",
+                }} />
+                {brainFryLevel.label}
+                <span style={{ fontSize: 10, opacity: 0.7 }}>({aiInteractionCount} AI calls)</span>
+              </div>
+            )}
+
+            {/* ─── SESSION BREAK REMINDER ─── */}
+            {showSessionBreak && (
+              <div style={{
+                padding: "12px 16px",
+                borderRadius: 10,
+                background: "#6E57E00a",
+                border: "1px solid #6E57E025",
+                marginBottom: 16,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#6E57E0" }}>
+                    You&apos;ve been going for a while. Quick stretch?
+                  </div>
+                  <div style={{ fontSize: 12, color: TEXT_LIGHT }}>
+                    Stepping away for a few minutes helps you stay sharp.
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowSessionBreak(false)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: TEXT_LIGHT,
+                    fontSize: 18,
+                    cursor: "pointer",
+                    padding: "0 4px",
+                  }}
+                >
+                  &times;
+                </button>
+              </div>
+            )}
+
+            {/* ─── QUICK CAPTURE ─── */}
+            {savedPlans.length > 0 && (
+              <div style={{ marginBottom: 20, position: "relative" }}>
+                <input
+                  type="text"
+                  value={quickCapture}
+                  onChange={(e) => {
+                    setQuickCapture(e.target.value);
+                    if (showProjectPicker) setShowProjectPicker(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && quickCapture.trim()) {
+                      if (savedPlans.length === 1) {
+                        addQuickCapture(savedPlans[0].id);
+                      } else {
+                        setShowProjectPicker(true);
+                      }
+                    }
+                    if (e.key === "Escape") {
+                      setShowProjectPicker(false);
+                      setQuickCapture("");
+                    }
+                  }}
+                  placeholder="Quick thought — what's on your mind?"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: `1px solid ${BORDER}`,
+                    background: SURFACE,
+                    color: TEXT,
+                    fontSize: 14,
+                    fontFamily: FONT,
+                    outline: "none",
+                    boxSizing: "border-box",
+                    transition: "border-color 0.15s",
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = `${PRIMARY}80`)}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = BORDER;
+                    // Delay hiding picker to allow click
+                    setTimeout(() => {
+                      if (showProjectPicker) setShowProjectPicker(false);
+                    }, 200);
+                  }}
+                />
+                {showProjectPicker && savedPlans.length > 1 && (
+                  <div style={{
+                    position: "absolute",
+                    top: "100%",
+                    left: 0,
+                    right: 0,
+                    marginTop: 4,
+                    background: SURFACE,
+                    border: `1px solid ${BORDER}`,
+                    borderRadius: 8,
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                    zIndex: 50,
+                    overflow: "hidden",
+                  }}>
+                    <div style={{ padding: "8px 12px", fontSize: 11, fontWeight: 600, color: TEXT_LIGHT, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                      Add to project
+                    </div>
+                    {savedPlans.map((sp) => (
+                      <button
+                        key={sp.id}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          addQuickCapture(sp.id);
+                        }}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          padding: "8px 12px",
+                          background: "none",
+                          border: "none",
+                          textAlign: "left",
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: TEXT,
+                          cursor: "pointer",
+                          fontFamily: FONT,
+                          transition: "background 0.1s",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = `${PRIMARY}08`)}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                      >
+                        {sp.project_title || "Untitled project"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ─── YOUR DAY ─── */}
             {savedPlans.length > 0 && (
               <div style={{ marginBottom: 32 }}>
-                {/* Focus mode toggle */}
+                {/* Focus mode toggle + Catch me up */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                  <h2 style={{ fontSize: 22, fontWeight: 700, color: TEXT, margin: 0 }}>Your Day</h2>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <h2 style={{ fontSize: 22, fontWeight: 700, color: TEXT, margin: 0 }}>Your Day</h2>
+                    {dayEnergy === "low" && (
+                      <span style={{
+                        padding: "3px 10px",
+                        borderRadius: 12,
+                        background: "#2DA44E14",
+                        border: "1px solid #2DA44E30",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "#2DA44E",
+                      }}>
+                        Low brain mode
+                      </span>
+                    )}
+                    <button
+                      onClick={() => setShowCatchUp(true)}
+                      style={{
+                        padding: "4px 12px",
+                        borderRadius: 16,
+                        border: `1px solid ${BORDER}`,
+                        background: SURFACE,
+                        color: TEXT_LIGHT,
+                        fontSize: 12,
+                        fontWeight: 500,
+                        cursor: "pointer",
+                        fontFamily: FONT,
+                        transition: "all 0.15s",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = PRIMARY; e.currentTarget.style.color = PRIMARY; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.color = TEXT_LIGHT; }}
+                    >
+                      Catch me up
+                    </button>
+                  </div>
                   <button
                     onClick={() => setGlobalFocusMode(!globalFocusMode)}
                     style={{
@@ -1612,6 +1833,38 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                     </div>
                   </div>
                 </div>
+
+                {/* Low-Brain Mode copy */}
+                {dayEnergy === "low" && yourDayTasks.length > 0 && (
+                  <div style={{
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    background: "#2DA44E08",
+                    border: "1px solid #2DA44E20",
+                    fontSize: 13,
+                    color: "#2DA44E",
+                    marginBottom: 12,
+                    fontWeight: 500,
+                  }}>
+                    Low energy? Here are tasks you can knock out without heavy thinking
+                  </div>
+                )}
+
+                {/* Low-Brain Mode copy */}
+                {dayEnergy === "low" && yourDayTasks.length > 0 && (
+                  <div style={{
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    background: "#2DA44E08",
+                    border: "1px solid #2DA44E20",
+                    fontSize: 13,
+                    color: "#2DA44E",
+                    marginBottom: 12,
+                    fontWeight: 500,
+                  }}>
+                    Low energy? Here are tasks you can knock out without heavy thinking
+                  </div>
+                )}
 
                 {/* Recommended tasks */}
                 {yourDayTasks.length > 0 ? (
@@ -2011,28 +2264,25 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
             {/* Hero */}
             <div style={{ textAlign: "center", marginBottom: 40, paddingTop: 20 }}>
               <h1 style={{ fontSize: 40, fontWeight: 800, color: TEXT, margin: "0 0 12px 0", lineHeight: 1.15 }}>
-                Describe it. Plan it.<br />Get it done.
+                Your AI tools are frying<br />your brain. We fix that.
               </h1>
-              <p style={{ fontSize: 17, color: TEXT_LIGHT, lineHeight: 1.6, maxWidth: 520, margin: "0 auto 24px" }}>
-                LetsBegin turns any goal into a smart project plan. AI handles what it can.
-                You handle what matters. Bring your own tools &mdash; no extra API costs.
+              <p style={{ fontSize: 17, color: TEXT_LIGHT, lineHeight: 1.6, maxWidth: 540, margin: "0 auto 24px" }}>
+                A 2026 BCG study found workers using 4+ AI tools make 39% more major errors.
+                LetsBegin replaces the chaos with one calm workflow &mdash; plan, execute, and review in a single place.
               </p>
             </div>
 
-            {/* Feature grid */}
+            {/* Value props */}
             <div style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
               gap: 14,
-              marginBottom: 40,
+              marginBottom: 32,
             }}>
               {[
-                { icon: "\uD83D\uDCAC", title: "Plain language in", desc: "Describe what you want to accomplish. We\u2019ll ask smart follow-up questions, then build a dependency graph of tasks." },
-                { icon: "\uD83E\uDDE0", title: "Bring your own AI", desc: "Have Claude Code, ChatGPT, or Gemini? Use them. We route each task to the best tool you already pay for." },
-                { icon: "\uD83C\uDFAF", title: "One thing at a time", desc: "Smart scheduling picks your next task based on deadlines, wait times, what it unblocks, and your energy level." },
-                { icon: "\u26A1", title: "Agents work for you", desc: "Coding, research, drafting \u2014 AI agents handle their tasks automatically or give you a ready-to-paste prompt." },
-                { icon: "\uD83D\uDCC5", title: "Deadline-aware", desc: "Set deadlines and the scheduler adjusts \u2014 factoring in wait times so you start things early enough." },
-                { icon: "\uD83D\uDDA4", title: "ADHD-friendly", desc: "Break any task into tiny steps, focus on one thing, get welcome-back recaps, and track streaks." },
+                { icon: "\uD83C\uDFAF", title: "One tool, not six", desc: "Plan, execute, and review in one place. No more tab circus. No more copy-pasting between ChatGPT, Notion, Jira, and Slack." },
+                { icon: "\uD83E\uDDE0", title: "AI does the work, you review the results", desc: "Batch review mode means less oversight, less context-switching, less brain fry. You stay in control without babysitting." },
+                { icon: "\u26A1", title: "Built for how your brain actually works", desc: "Energy-aware task routing. ADHD-friendly focus mode. Break reminders. Your pace, not the AI\u2019s." },
               ].map((f) => (
                 <div key={f.title} style={{
                   padding: "16px",
@@ -2047,28 +2297,19 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
               ))}
             </div>
 
-            {/* How it works */}
-            <div style={{ textAlign: "center", marginBottom: 40 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: TEXT, marginBottom: 16 }}>How it works</h2>
-              <div style={{ display: "flex", justifyContent: "center", gap: 32, flexWrap: "wrap" }}>
-                {[
-                  { step: "1", label: "Describe your project" },
-                  { step: "2", label: "Answer a few questions" },
-                  { step: "3", label: "Get your smart plan" },
-                  { step: "4", label: "Do one thing at a time" },
-                ].map((s) => (
-                  <div key={s.step} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{
-                      width: 28, height: 28, borderRadius: "50%",
-                      background: PRIMARY, color: "#fff",
-                      fontSize: 13, fontWeight: 700,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      flexShrink: 0,
-                    }}>{s.step}</span>
-                    <span style={{ fontSize: 13, color: TEXT, fontWeight: 500 }}>{s.label}</span>
-                  </div>
-                ))}
-              </div>
+            {/* Social proof / credibility */}
+            <div style={{
+              textAlign: "center",
+              marginBottom: 40,
+              padding: "16px 20px",
+              borderRadius: 12,
+              background: SURFACE,
+              border: `1px solid ${BORDER}`,
+            }}>
+              <p style={{ fontSize: 13, color: TEXT_LIGHT, margin: 0, lineHeight: 1.7 }}>
+                Works with Claude, GPT, Gemini &mdash; or bring your own API key.<br />
+                Open protocol: compatible with OpenClaw, MCP, and more.
+              </p>
             </div>
 
             {/* Auth form */}
@@ -2231,7 +2472,7 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
             </div>
 
             <p style={{ textAlign: "center", fontSize: 11, color: "#B0AFA8", marginTop: 24 }}>
-              Free to use. Bring your own AI tools to save on API costs.
+              Free to use. One tool to replace the chaos &mdash; zero brain fry.
             </p>
           </div>
         )}
@@ -2249,40 +2490,11 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                   Pick the style that fits you best. You can always change this later.
                 </p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                  {/* Planner card */}
-                  <button
-                    onClick={() => {
-                      setUserProfile({ mode: "planner", hasAiTools: false, setupMcp: false });
-                      setExecutionMode("byo");
-                      setJustMeMode(true);
-                      setOnboardingScreen(3);
-                    }}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "28px 28px",
-                      borderRadius: 16,
-                      border: `2px solid ${BORDER}`,
-                      background: SURFACE,
-                      cursor: "pointer",
-                      fontFamily: "'DM Sans', sans-serif",
-                      transition: "border-color 0.15s, box-shadow 0.15s",
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = PRIMARY; e.currentTarget.style.boxShadow = `0 0 0 1px ${PRIMARY}20`; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.boxShadow = "none"; }}
-                  >
-                    <div style={{ fontSize: 32, marginBottom: 12 }}>📋</div>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 6 }}>I just want a plan</div>
-                    <div style={{ fontSize: 15, color: TEXT_LIGHT, lineHeight: 1.5 }}>
-                      Give me a smart plan for my projects. I&apos;ll handle execution myself or with my own tools.
-                    </div>
-                  </button>
-
-                  {/* Builder card */}
+                  {/* BYO card */}
                   <button
                     onClick={() => {
                       setUserProfile((prev) => ({ ...prev, mode: "builder", hasAiTools: true }));
+                      setExecutionMode("byo");
                       setOnboardingScreen(2);
                     }}
                     style={{
@@ -2300,14 +2512,14 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                     onMouseEnter={(e) => { e.currentTarget.style.borderColor = PRIMARY; e.currentTarget.style.boxShadow = `0 0 0 1px ${PRIMARY}20`; }}
                     onMouseLeave={(e) => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.boxShadow = "none"; }}
                   >
-                    <div style={{ fontSize: 32, marginBottom: 12 }}>🔗</div>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 6 }}>I have AI tools — coordinate them</div>
+                    <div style={{ fontSize: 32, marginBottom: 12 }}>🔑</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 6 }}>I&apos;ll bring my own AI</div>
                     <div style={{ fontSize: 15, color: TEXT_LIGHT, lineHeight: 1.5 }}>
-                      I already use Claude Code, ChatGPT, Gemini, etc. Route tasks to my tools and save me API costs.
+                      Use your own API keys or Claude Code with MCP. You control the costs.
                     </div>
                   </button>
 
-                  {/* Full card */}
+                  {/* Full/API card */}
                   <button
                     onClick={() => {
                       setUserProfile({ mode: "full", hasAiTools: false, setupMcp: false });
@@ -2332,7 +2544,7 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                     <div style={{ fontSize: 32, marginBottom: 12 }}>⚡</div>
                     <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 6 }}>Just make it work</div>
                     <div style={{ fontSize: 15, color: TEXT_LIGHT, lineHeight: 1.5 }}>
-                      Use your AI to plan and execute. I&apos;ll handle the human parts.
+                      We handle the AI. Start building immediately.
                     </div>
                   </button>
                 </div>
@@ -2363,156 +2575,108 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
             {onboardingScreen === 2 && (
               <div>
                 <h1 style={{ fontSize: 32, fontWeight: 700, color: TEXT, marginBottom: 8, textAlign: "center", fontFamily: "'DM Sans', sans-serif" }}>
-                  What do you have?
+                  How do you connect?
                 </h1>
                 <p style={{ fontSize: 16, color: TEXT_LIGHT, marginBottom: 36, textAlign: "center", fontFamily: "'DM Sans', sans-serif", lineHeight: 1.6 }}>
-                  Select the AI tools you already have access to. We&apos;ll pick the best one for each job.
+                  Choose your path. You can always change this later.
                 </p>
 
-                {/* Subscriptions group */}
-                <div style={{ marginBottom: 28 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: TEXT_LIGHT, textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 12, fontFamily: "'DM Sans', sans-serif" }}>
-                    Subscriptions
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    {(["claude-code", "claude-cowork", "claude-max", "chatgpt-plus", "gemini-pro"] as UserTool[]).map((tool) => {
-                      const cap = TOOL_CAPABILITIES[tool];
-                      const isSelected = onboardingTools.includes(tool);
-                      return (
-                        <button
-                          key={tool}
-                          onClick={() => {
-                            setOnboardingTools((prev) =>
-                              isSelected ? prev.filter((t) => t !== tool) : [...prev, tool]
-                            );
-                          }}
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {/* API Keys path */}
+                  <div style={{
+                    padding: "24px", borderRadius: 16,
+                    border: `2px solid ${BORDER}`, background: SURFACE,
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 4 }}>🔑 API Keys</div>
+                    <div style={{ fontSize: 14, color: TEXT_LIGHT, marginBottom: 16, lineHeight: 1.5 }}>
+                      Add at least one key. We&apos;ll use it for all AI operations.
+                    </div>
+                    {(["anthropic", "google", "openai"] as const).map((provider) => (
+                      <div key={provider} style={{ marginBottom: 10 }}>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: TEXT, display: "block", marginBottom: 4, textTransform: "capitalize" as const }}>
+                          {provider === "anthropic" ? "Anthropic" : provider === "google" ? "Google AI" : "OpenAI"} API Key
+                        </label>
+                        <input
+                          type="password"
+                          value={byokKeysDraft[provider] || byoKeys[provider] || ""}
+                          onChange={(e) => setByokKeysDraft((prev) => ({ ...prev, [provider]: e.target.value }))}
+                          placeholder={`sk-...`}
                           style={{
-                            display: "flex",
-                            alignItems: "flex-start",
-                            gap: 12,
-                            padding: "16px 16px",
-                            borderRadius: 12,
-                            border: `2px solid ${isSelected ? PRIMARY : BORDER}`,
-                            background: isSelected ? `${PRIMARY}08` : SURFACE,
-                            cursor: "pointer",
-                            fontFamily: "'DM Sans', sans-serif",
-                            textAlign: "left",
-                            transition: "border-color 0.15s",
-                            position: "relative" as const,
+                            width: "100%", padding: "8px 12px", fontSize: 13,
+                            fontFamily: "'DM Mono', monospace", borderRadius: 8,
+                            border: `1.5px solid ${BORDER}`, background: "#FAFAF9",
+                            outline: "none", boxSizing: "border-box",
                           }}
-                          onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.borderColor = `${PRIMARY}60`; }}
-                          onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.borderColor = BORDER; }}
-                        >
-                          {isSelected && (
-                            <div style={{ position: "absolute", top: 8, right: 8, fontSize: 14, color: PRIMARY }}>✓</div>
-                          )}
-                          <div style={{ fontSize: 24, flexShrink: 0 }}>{cap.icon}</div>
-                          <div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 2 }}>{cap.label}</div>
-                            <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
-                              {cap.strengths.join(", ")}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
+                        />
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => {
+                        const merged = { ...byoKeys, ...byokKeysDraft };
+                        setByoKeys(merged);
+                        localStorage.setItem("letsbegin-byo-keys", JSON.stringify(merged));
+                        const tools: UserTool[] = [];
+                        if (merged.anthropic) tools.push("api-anthropic");
+                        if (merged.google) tools.push("api-google");
+                        if (merged.openai) tools.push("api-openai");
+                        if (tools.length > 0) {
+                          setUserTools({ available: tools });
+                          setExecutionMode("byo");
+                          setUserProfile((prev) => ({ ...prev, hasAiTools: true }));
+                          setOnboardingScreen(3);
+                        }
+                      }}
+                      disabled={!byokKeysDraft.anthropic && !byokKeysDraft.google && !byokKeysDraft.openai && !byoKeys.anthropic && !byoKeys.google && !byoKeys.openai}
+                      style={{
+                        marginTop: 8, padding: "10px 24px", border: "none", borderRadius: 10,
+                        background: PRIMARY, color: "#fff", fontSize: 14, fontWeight: 600,
+                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                        opacity: (!byokKeysDraft.anthropic && !byokKeysDraft.google && !byokKeysDraft.openai && !byoKeys.anthropic && !byoKeys.google && !byoKeys.openai) ? 0.5 : 1,
+                      }}
+                    >
+                      Save keys & continue
+                    </button>
+                  </div>
+
+                  {/* MCP path */}
+                  <div style={{
+                    padding: "24px", borderRadius: 16,
+                    border: `2px solid ${BORDER}`, background: SURFACE,
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: TEXT, marginBottom: 4 }}>🧠 MCP (Claude Code)</div>
+                    <div style={{ fontSize: 14, color: TEXT_LIGHT, marginBottom: 12, lineHeight: 1.5 }}>
+                      For the most seamless experience. Claude Code handles everything automatically via MCP tools.
+                    </div>
+                    <button
+                      onClick={() => {
+                        setUserTools({ available: ["claude-code"] });
+                        setExecutionMode("byo");
+                        setUserProfile((prev) => ({ ...prev, hasAiTools: true, setupMcp: true }));
+                        setOnboardingScreen(3);
+                      }}
+                      style={{
+                        padding: "10px 24px", border: `1.5px solid ${BORDER}`, borderRadius: 10,
+                        background: "transparent", color: TEXT, fontSize: 14, fontWeight: 600,
+                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      I use Claude Code
+                    </button>
                   </div>
                 </div>
-
-                {/* API Keys group */}
-                <div style={{ marginBottom: 32 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: TEXT_LIGHT, textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 12, fontFamily: "'DM Sans', sans-serif" }}>
-                    API Keys
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    {(["api-anthropic", "api-google", "api-openai"] as UserTool[]).map((tool) => {
-                      const cap = TOOL_CAPABILITIES[tool];
-                      const isSelected = onboardingTools.includes(tool);
-                      return (
-                        <button
-                          key={tool}
-                          onClick={() => {
-                            setOnboardingTools((prev) =>
-                              isSelected ? prev.filter((t) => t !== tool) : [...prev, tool]
-                            );
-                          }}
-                          style={{
-                            display: "flex",
-                            alignItems: "flex-start",
-                            gap: 12,
-                            padding: "16px 16px",
-                            borderRadius: 12,
-                            border: `2px solid ${isSelected ? PRIMARY : BORDER}`,
-                            background: isSelected ? `${PRIMARY}08` : SURFACE,
-                            cursor: "pointer",
-                            fontFamily: "'DM Sans', sans-serif",
-                            textAlign: "left",
-                            transition: "border-color 0.15s",
-                            position: "relative" as const,
-                          }}
-                          onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.borderColor = `${PRIMARY}60`; }}
-                          onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.borderColor = BORDER; }}
-                        >
-                          {isSelected && (
-                            <div style={{ position: "absolute", top: 8, right: 8, fontSize: 14, color: PRIMARY }}>✓</div>
-                          )}
-                          <div style={{ fontSize: 24, flexShrink: 0 }}>{cap.icon}</div>
-                          <div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 2 }}>{cap.label}</div>
-                            <div style={{ fontSize: 12, color: TEXT_LIGHT, lineHeight: 1.4 }}>
-                              {cap.strengths.join(", ")}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <p style={{ fontSize: 14, color: TEXT_LIGHT, textAlign: "center", marginBottom: 24, fontFamily: "'DM Sans', sans-serif", lineHeight: 1.5 }}>
-                  These tools will handle your AI tasks. We&apos;ll pick the best one for each job.
-                </p>
-
-                {onboardingTools.length > 0 && (
-                  <button
-                    onClick={() => {
-                      setUserTools({ available: onboardingTools });
-                      setExecutionMode("byo");
-                      setUserProfile((prev) => ({ ...prev, hasAiTools: true }));
-                      setOnboardingScreen(3);
-                    }}
-                    style={{
-                      width: "100%",
-                      padding: "16px 24px",
-                      borderRadius: 12,
-                      border: "none",
-                      background: PRIMARY,
-                      color: "#fff",
-                      fontSize: 16,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      fontFamily: "'DM Sans', sans-serif",
-                    }}
-                  >
-                    Continue →
-                  </button>
-                )}
 
                 <div style={{ textAlign: "center", marginTop: 16 }}>
                   <button
                     onClick={() => setOnboardingScreen(1)}
                     style={{
-                      background: "none",
-                      border: "none",
-                      color: TEXT_LIGHT,
-                      fontSize: 13,
-                      cursor: "pointer",
-                      fontFamily: "'DM Sans', sans-serif",
-                      textDecoration: "underline",
-                      textUnderlineOffset: 3,
+                      background: "none", border: "none", color: TEXT_LIGHT,
+                      fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      textDecoration: "underline", textUnderlineOffset: 3,
                     }}
                   >
-                    ← Back
+                    &larr; Back
                   </button>
                 </div>
               </div>
@@ -2535,111 +2699,13 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                   textAlign: "left",
                   fontFamily: "'DM Sans', sans-serif",
                 }}>
-                  {userProfile.mode === "planner" && (
+                  {executionMode === "byo" ? (
                     <p style={{ fontSize: 16, color: TEXT, lineHeight: 1.6, margin: 0 }}>
-                      You&apos;re set up as a <strong>planner</strong>. We&apos;ll build smart project plans — you execute with your own tools.
+                      Your AI, your costs. We&apos;ll use your API keys or MCP for all AI operations. Same experience, your quota.
                     </p>
-                  )}
-                  {userProfile.mode === "builder" && (
-                    <div>
-                      <p style={{ fontSize: 16, color: TEXT, lineHeight: 1.6, margin: 0 }}>
-                        We&apos;ll route tasks to{" "}
-                        <strong>{onboardingTools.map((t) => TOOL_CAPABILITIES[t].label).join(", ")}</strong>.
-                        You handle the human parts.
-                      </p>
-                      {onboardingTools.includes("claude-code") && (
-                        <div style={{ marginTop: 16, padding: "14px 16px", borderRadius: 10, background: SURFACE, border: `1px solid ${BORDER}` }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <div>
-                              <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 2 }}>
-                                💡 Pro tip: Set up MCP in Claude Code
-                              </div>
-                              <div style={{ fontSize: 13, color: TEXT_LIGHT }}>
-                                Enable hands-free planning with MCP integration.
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => setUserProfile((prev) => ({ ...prev, setupMcp: !prev.setupMcp }))}
-                              style={{
-                                padding: "6px 14px",
-                                borderRadius: 8,
-                                border: `1px solid ${userProfile.setupMcp ? PRIMARY : BORDER}`,
-                                background: userProfile.setupMcp ? `${PRIMARY}12` : SURFACE,
-                                color: userProfile.setupMcp ? PRIMARY : TEXT_LIGHT,
-                                fontSize: 12,
-                                fontWeight: 600,
-                                cursor: "pointer",
-                                fontFamily: "'DM Sans', sans-serif",
-                              }}
-                            >
-                              {userProfile.setupMcp ? "Hide setup" : "Show setup"}
-                            </button>
-                          </div>
-                          {userProfile.setupMcp && (
-                            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
-                              {/* Step 1 */}
-                              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                                <div style={{ minWidth: 28, height: 28, borderRadius: "50%", background: PRIMARY, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, marginTop: 2 }}>1</div>
-                                <div style={{ flex: 1 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 6 }}>One-time setup</div>
-                                  <div style={{ position: "relative" }}>
-                                    <div style={{ padding: "10px 12px", borderRadius: 8, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                                      {`git clone https://github.com/nickarino/LetsBegin.git && cd LetsBegin/mcp-server && npm install`}
-                                    </div>
-                                    <button onClick={() => { navigator.clipboard.writeText("git clone https://github.com/nickarino/LetsBegin.git && cd LetsBegin/mcp-server && npm install"); setMcpCopiedStep("onb-1"); setTimeout(() => setMcpCopiedStep(null), 2000); }} style={{ position: "absolute", top: 6, right: 6, padding: "3px 8px", borderRadius: 4, border: "none", background: mcpCopiedStep === "onb-1" ? "#2DA44E" : "#333", color: "#fff", fontSize: 10, cursor: "pointer", fontFamily: FONT }}>
-                                      {mcpCopiedStep === "onb-1" ? "Copied!" : "Copy"}
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                              {/* Step 2 */}
-                              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                                <div style={{ minWidth: 28, height: 28, borderRadius: "50%", background: PRIMARY, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, marginTop: 2 }}>2</div>
-                                <div style={{ flex: 1 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 4 }}>Add to <span style={{ fontFamily: MONO, fontSize: 12 }}>.claude/mcp.json</span></div>
-                                  <div style={{ fontSize: 11, color: TEXT_LIGHT, marginBottom: 6 }}>Service key: Supabase → Settings → API → service_role key</div>
-                                  <div style={{ position: "relative" }}>
-                                    <div style={{ padding: "10px 12px", borderRadius: 8, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-{`{
-  "mcpServers": {
-    "letsbegin": {
-      "command": "npx",
-      "args": ["tsx", "ACTUAL_PATH/mcp-server/src/index.ts"],
-      "env": {
-        "SUPABASE_URL": "${supabaseUrl}",  // pre-filled!
-        "SUPABASE_SERVICE_KEY": "YOUR_KEY"
-      }
-    }
-  }
-}`}
-                                    </div>
-                                    <button onClick={() => { navigator.clipboard.writeText(JSON.stringify({ mcpServers: { letsbegin: { command: "npx", args: ["tsx", "ACTUAL_PATH/mcp-server/src/index.ts"], env: { SUPABASE_URL: supabaseUrl, SUPABASE_SERVICE_KEY: "YOUR_KEY" } } } }, null, 2)); setMcpCopiedStep("onb-2"); setTimeout(() => setMcpCopiedStep(null), 2000); }} style={{ position: "absolute", top: 6, right: 6, padding: "3px 8px", borderRadius: 4, border: "none", background: mcpCopiedStep === "onb-2" ? "#2DA44E" : "#333", color: "#fff", fontSize: 10, cursor: "pointer", fontFamily: FONT }}>
-                                      {mcpCopiedStep === "onb-2" ? "Copied!" : "Copy config"}
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                              {/* Step 3 */}
-                              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                                <div style={{ minWidth: 28, height: 28, borderRadius: "50%", background: PRIMARY, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, marginTop: 2 }}>3</div>
-                                <div style={{ flex: 1 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: TEXT, marginBottom: 6 }}>Restart Claude Code and say:</div>
-                                  <div style={{ position: "relative" }}>
-                                    <div style={{ padding: "10px 12px", borderRadius: 8, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.6 }}>
-                                      {`"Plan my project: [your brief]"`}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {userProfile.mode === "full" && (
+                  ) : (
                     <p style={{ fontSize: 16, color: TEXT, lineHeight: 1.6, margin: 0 }}>
-                      We&apos;ll handle everything. You focus on the human tasks.
+                      We&apos;ll handle the AI. You focus on the human tasks.
                     </p>
                   )}
                 </div>
@@ -3223,219 +3289,49 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
               <span>New project</span>
             </div>
             {byoClarifyActive ? (
-              <div>
-                {/* Tool badge */}
-                {(() => {
-                  const firstTool = userTools.preferred || userTools.available[0];
-                  const cap = firstTool ? TOOL_CAPABILITIES[firstTool] : null;
-                  return cap ? (
-                    <div style={{
-                      display: "inline-flex", alignItems: "center", gap: 6,
-                      padding: "4px 10px", borderRadius: 6,
-                      background: "#E8F0FE", color: "#1967D2", fontSize: 12, fontWeight: 600, marginBottom: 12,
-                    }}>
-                      {cap.icon} Clarify with {cap.label}
-                    </div>
-                  ) : null;
-                })()}
-
-                {/* Step indicators */}
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 0,
-                  marginBottom: 14, fontSize: 12, fontFamily: "'DM Sans', sans-serif",
-                }}>
-                  {[
-                    { num: 1, label: "Copy prompt", active: !byoJsonInput.trim() && questions.length === 0, done: !!byoJsonInput.trim() || questions.length > 0 },
-                    { num: 2, label: "Paste questions JSON", active: !!byoJsonInput.trim() && questions.length === 0, done: questions.length > 0 },
-                    { num: 3, label: "Answer questions", active: questions.length > 0, done: false },
-                  ].map((s, i) => (
-                    <div key={s.num} style={{ display: "flex", alignItems: "center" }}>
-                      <div style={{
-                        display: "flex", alignItems: "center", gap: 5,
-                        padding: "4px 10px", borderRadius: 20,
-                        background: s.active ? `${PRIMARY}14` : s.done ? "#2DA44E12" : "transparent",
-                        border: `1px solid ${s.active ? PRIMARY : s.done ? "#2DA44E40" : BORDER}`,
-                        color: s.active ? PRIMARY : s.done ? "#2DA44E" : TEXT_LIGHT,
-                        fontWeight: s.active ? 600 : 400,
-                        transition: "all 0.2s",
-                      }}>
-                        <span style={{
-                          width: 18, height: 18, borderRadius: 9,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 10, fontWeight: 700,
-                          background: s.done ? "#2DA44E" : s.active ? PRIMARY : BORDER,
-                          color: s.done || s.active ? "#fff" : TEXT_LIGHT,
-                        }}>
-                          {s.done ? "\u2713" : s.num}
-                        </span>
-                        {s.label}
-                      </div>
-                      {i < 2 && (
-                        <div style={{ width: 20, height: 1, background: s.done ? "#2DA44E60" : BORDER, margin: "0 2px" }} />
-                      )}
-                    </div>
-                  ))}
+              <div style={{
+                padding: "24px", borderRadius: 14,
+                border: `1.5px solid ${BORDER}`, background: "#FAFAF9",
+                fontFamily: "'DM Sans', sans-serif", textAlign: "center",
+              }}>
+                <div style={{ fontSize: 16, fontWeight: 600, color: TEXT, marginBottom: 8 }}>
+                  Add your API key to plan with your own AI
                 </div>
-
-                <div style={{ fontSize: 12, color: TEXT_LIGHT, marginBottom: 10, fontStyle: "italic" }}>
-                  This saves API costs by using your own AI
+                <div style={{ fontSize: 14, color: TEXT_LIGHT, marginBottom: 16, lineHeight: 1.5 }}>
+                  Once you add an API key, we&apos;ll use it transparently for all AI operations.
                 </div>
-
-                {/* Copyable prompt block */}
-                <div
-                  onClick={() => {
-                    navigator.clipboard.writeText(byoClarifyPrompt).then(() => {
-                      setByoCopied(true);
-                      setTimeout(() => setByoCopied(false), 2000);
-                    });
-                  }}
-                  style={{
-                    background: "#1C1C1E", borderRadius: 10,
-                    padding: 14, fontSize: 12,
-                    fontFamily: "'DM Mono', 'Fira Code', monospace",
-                    lineHeight: 1.5, color: "#8FBC8F",
-                    marginBottom: 8, cursor: "pointer",
-                    whiteSpace: "pre-wrap", wordBreak: "break-word",
-                    maxHeight: 200, overflow: "auto",
-                    position: "relative",
-                  }}
-                  title="Click to copy prompt"
-                >
-                  {byoClarifyPrompt}
-                </div>
-
-                {/* Open in Tool + Copy buttons */}
-                <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center", flexWrap: "wrap" }}>
-                  {(() => {
-                    const info = getPreferredByoTool();
-                    if (info?.url) {
-                      return (
-                        <button
-                          onClick={() => handleOpenInTool(byoClarifyPrompt)}
-                          style={{
-                            padding: "8px 18px", border: "none", borderRadius: 8,
-                            background: byoOpenedTool ? "#2DA44E" : PRIMARY,
-                            color: "#fff", fontSize: 13, fontWeight: 600,
-                            cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                            transition: "background 0.2s",
-                            display: "inline-flex", alignItems: "center", gap: 6,
-                          }}
-                        >
-                          {byoOpenedTool
-                            ? `Prompt copied! Opening ${byoOpenedTool}...`
-                            : `Open in ${info.cap.label} \u2192`}
-                        </button>
-                      );
-                    }
-                    return null;
-                  })()}
+                <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
                   <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(byoClarifyPrompt).then(() => {
-                        setByoCopied(true);
-                        setTimeout(() => setByoCopied(false), 2000);
-                      });
-                    }}
+                    onClick={() => { setShowByokSection(true); }}
                     style={{
-                      padding: "6px 14px", border: `1px solid ${BORDER}`, borderRadius: 8,
-                      background: byoCopied ? "#2DA44E" : "transparent",
-                      color: byoCopied ? "#fff" : TEXT_LIGHT, fontSize: 12, fontWeight: 500,
-                      cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                      transition: "all 0.2s",
-                    }}
-                  >
-                    {byoCopied ? "\u2713 Copied!" : "Copy prompt"}
-                  </button>
-                </div>
-
-                {/* Waiting for result indicator */}
-                {byoWaitingForResult && !byoJsonInput.trim() && (
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "8px 12px", borderRadius: 8,
-                    background: `${PRIMARY}08`, border: `1px solid ${PRIMARY}20`,
-                    marginBottom: 10, fontSize: 12, color: PRIMARY, fontWeight: 500,
-                  }}>
-                    <div style={{
-                      width: 12, height: 12,
-                      border: `2px solid ${PRIMARY}`,
-                      borderTopColor: "transparent",
-                      borderRadius: "50%",
-                      animation: "spin 0.8s linear infinite",
-                    }} />
-                    Waiting for your result...
-                  </div>
-                )}
-
-                {/* Paste area */}
-                <div style={{ marginTop: 4 }}>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: TEXT, display: "block", marginBottom: 6 }}>
-                    Paste the JSON result from your AI:
-                  </label>
-                  <textarea
-                    value={byoJsonInput}
-                    onChange={(e) => { setByoJsonInput(e.target.value); setByoJsonError(""); }}
-                    placeholder={'{\n  "questions": [\n    { "id": "scope", "question": "...", "type": "short" }\n  ]\n}'}
-                    style={{
-                      width: "100%", minHeight: 120, padding: 12, fontSize: 13,
-                      fontFamily: "'DM Mono', 'Fira Code', monospace", borderRadius: 10,
-                      border: `1.5px solid ${byoJsonError ? "#CF522E" : BORDER}`,
-                      background: "#FAFAF9",
-                      outline: "none", resize: "vertical", lineHeight: 1.5,
-                      boxSizing: "border-box",
-                    }}
-                  />
-                  {byoJsonError && (
-                    <div style={{ fontSize: 12, color: "#CF522E", marginTop: 6 }}>{byoJsonError}</div>
-                  )}
-                </div>
-
-                {/* Action buttons */}
-                <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
-                  {byoJsonInput.trim() && (
-                    <button
-                      onClick={handleByoClarifyPaste}
-                      style={{
-                        padding: "10px 24px", border: "none", borderRadius: 10,
-                        background: PRIMARY, color: "#fff", fontSize: 14, fontWeight: 600,
-                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                      }}
-                    >
-                      Load questions
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      setByoClarifyActive(false);
-                      setAnswers({});
-                      handleCompile();
-                    }}
-                    style={{
-                      padding: "10px 20px", border: `1px solid ${BORDER}`, borderRadius: 10,
-                      background: SURFACE, color: TEXT_LIGHT, fontSize: 13,
+                      padding: "10px 24px", border: "none", borderRadius: 10,
+                      background: PRIMARY, color: "#fff", fontSize: 14, fontWeight: 600,
                       cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
                     }}
                   >
-                    Skip questions
+                    Add your API key
                   </button>
                   <button
                     onClick={handleClarifyFallbackToApi}
                     style={{
-                      padding: "10px 16px", border: "none", borderRadius: 10,
-                      background: "transparent", color: TEXT_LIGHT, fontSize: 12,
+                      padding: "10px 20px", border: `1px solid ${BORDER}`, borderRadius: 10,
+                      background: SURFACE, color: TEXT, fontSize: 14, fontWeight: 500,
                       cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                      textDecoration: "underline", textDecorationStyle: "dotted" as const,
                     }}
                   >
-                    Use our AI instead
+                    Use our API instead
                   </button>
-                  <div style={{ flex: 1 }} />
+                </div>
+                <div style={{ fontSize: 12, color: TEXT_LIGHT, marginTop: 14 }}>
+                  Or if you use Claude Code: set up MCP for hands-free execution.
+                </div>
+                <div style={{ marginTop: 12 }}>
                   <button
                     onClick={() => setStep("input")}
                     style={{
-                      padding: "10px 16px", border: `1px solid ${BORDER}`, borderRadius: 10,
-                      background: "transparent", color: TEXT_LIGHT, fontSize: 13,
+                      background: "none", border: "none", color: TEXT_LIGHT, fontSize: 13,
                       cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      textDecoration: "underline", textDecorationStyle: "dotted" as const,
                     }}
                   >
                     &larr; Back to brief
@@ -3773,296 +3669,49 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
               <span>New project</span>
             </div>
             {byoPlanActive ? (
-              <div>
-                {/* Tool badge */}
-                {(() => {
-                  const firstTool = userTools.preferred || userTools.available[0];
-                  const cap = firstTool ? TOOL_CAPABILITIES[firstTool] : null;
-                  return cap ? (
-                    <div style={{
-                      display: "inline-flex", alignItems: "center", gap: 6,
-                      padding: "4px 10px", borderRadius: 6,
-                      background: "#E8F0FE", color: "#1967D2", fontSize: 12, fontWeight: 600, marginBottom: 12,
-                    }}>
-                      {cap.icon} Plan with {cap.label}
-                    </div>
-                  ) : null;
-                })()}
-
-                {/* Step indicators */}
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 0,
-                  marginBottom: 14, fontSize: 12, fontFamily: "'DM Sans', sans-serif",
-                }}>
-                  {[
-                    { num: 1, label: "Copy prompt", active: !byoJsonInput.trim(), done: !!byoJsonInput.trim() },
-                    { num: 2, label: "Paste plan JSON", active: !!byoJsonInput.trim(), done: false },
-                  ].map((s, i) => (
-                    <div key={s.num} style={{ display: "flex", alignItems: "center" }}>
-                      <div style={{
-                        display: "flex", alignItems: "center", gap: 5,
-                        padding: "4px 10px", borderRadius: 20,
-                        background: s.active ? `${PRIMARY}14` : s.done ? "#2DA44E12" : "transparent",
-                        border: `1px solid ${s.active ? PRIMARY : s.done ? "#2DA44E40" : BORDER}`,
-                        color: s.active ? PRIMARY : s.done ? "#2DA44E" : TEXT_LIGHT,
-                        fontWeight: s.active ? 600 : 400,
-                        transition: "all 0.2s",
-                      }}>
-                        <span style={{
-                          width: 18, height: 18, borderRadius: 9,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 10, fontWeight: 700,
-                          background: s.done ? "#2DA44E" : s.active ? PRIMARY : BORDER,
-                          color: s.done || s.active ? "#fff" : TEXT_LIGHT,
-                        }}>
-                          {s.done ? "\u2713" : s.num}
-                        </span>
-                        {s.label}
-                      </div>
-                      {i < 1 && (
-                        <div style={{ width: 20, height: 1, background: s.done ? "#2DA44E60" : BORDER, margin: "0 2px" }} />
-                      )}
-                    </div>
-                  ))}
+              <div style={{
+                padding: "24px", borderRadius: 14,
+                border: `1.5px solid ${BORDER}`, background: "#FAFAF9",
+                fontFamily: "'DM Sans', sans-serif", textAlign: "center",
+              }}>
+                <div style={{ fontSize: 16, fontWeight: 600, color: TEXT, marginBottom: 8 }}>
+                  Add your API key to build plans with your own AI
                 </div>
-
-                <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8, color: TEXT }}>
-                  Generate your plan
-                </h2>
-                <div style={{ fontSize: 12, color: TEXT_LIGHT, marginBottom: 12, fontStyle: "italic" }}>
-                  This saves API costs by using your own AI
+                <div style={{ fontSize: 14, color: TEXT_LIGHT, marginBottom: 16, lineHeight: 1.5 }}>
+                  Once you add an API key, we&apos;ll use it transparently for all AI operations.
                 </div>
-
-                {/* MCP callout for Claude Code users */}
-                {userTools.available.includes("claude-code") && (
-                  <div style={{
-                    padding: "12px 16px", borderRadius: 10,
-                    background: "#E8F0FE", border: "1px solid #1967D240",
-                    marginBottom: 14,
-                  }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1967D2", marginBottom: 4 }}>
-                      Using Claude Code? Skip all this.
-                    </div>
-                    <div style={{ fontSize: 12, color: "#37352F", lineHeight: 1.5, marginBottom: 6 }}>
-                      Set up the LetsBegin MCP server and just say: <span style={{ fontFamily: "'DM Mono', monospace", background: "#fff", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>&quot;Plan my project: {brief.slice(0, 60)}{brief.length > 60 ? "..." : ""}&quot;</span><br />
-                      Claude Code will generate and submit the plan automatically.
-                    </div>
-                    <button
-                      onClick={() => setShowMcpSetup((v) => !v)}
-                      style={{
-                        padding: "4px 12px", border: "none", borderRadius: 6,
-                        background: "#1967D2", color: "#fff", fontSize: 12, fontWeight: 600,
-                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                      }}
-                    >
-                      {showMcpSetup ? "Hide setup" : "Set up MCP \u2192"}
-                    </button>
-                    {showMcpSetup && (
-                      <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
-                        {/* Step 1 */}
-                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                          <div style={{ minWidth: 24, height: 24, borderRadius: "50%", background: "#1967D2", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, marginTop: 2 }}>1</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: TEXT, marginBottom: 4 }}>One-time setup</div>
-                            <div style={{ position: "relative" }}>
-                              <div style={{ padding: "8px 10px", borderRadius: 6, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                                {`git clone https://github.com/nickarino/LetsBegin.git && cd LetsBegin/mcp-server && npm install`}
-                              </div>
-                              <button onClick={() => { navigator.clipboard.writeText("git clone https://github.com/nickarino/LetsBegin.git && cd LetsBegin/mcp-server && npm install"); setMcpCopiedStep("byo-1"); setTimeout(() => setMcpCopiedStep(null), 2000); }} style={{ position: "absolute", top: 4, right: 4, padding: "2px 7px", borderRadius: 4, border: "none", background: mcpCopiedStep === "byo-1" ? "#2DA44E" : "#333", color: "#fff", fontSize: 10, cursor: "pointer", fontFamily: FONT }}>
-                                {mcpCopiedStep === "byo-1" ? "Copied!" : "Copy"}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                        {/* Step 2 */}
-                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                          <div style={{ minWidth: 24, height: 24, borderRadius: "50%", background: "#1967D2", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, marginTop: 2 }}>2</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: TEXT, marginBottom: 3 }}>Add to <span style={{ fontFamily: MONO, fontSize: 11 }}>.claude/mcp.json</span></div>
-                            <div style={{ fontSize: 10, color: TEXT_LIGHT, marginBottom: 5 }}>Service key: Supabase &rarr; Settings &rarr; API &rarr; service_role key</div>
-                            <div style={{ position: "relative" }}>
-                              <div style={{ padding: "8px 10px", borderRadius: 6, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-{`{
-  "mcpServers": {
-    "letsbegin": {
-      "command": "npx",
-      "args": ["tsx", "ACTUAL_PATH/mcp-server/src/index.ts"],
-      "env": {
-        "SUPABASE_URL": "${supabaseUrl}",  // pre-filled!
-        "SUPABASE_SERVICE_KEY": "YOUR_KEY"
-      }
-    }
-  }
-}`}
-                              </div>
-                              <button onClick={() => { navigator.clipboard.writeText(JSON.stringify({ mcpServers: { letsbegin: { command: "npx", args: ["tsx", "ACTUAL_PATH/mcp-server/src/index.ts"], env: { SUPABASE_URL: supabaseUrl, SUPABASE_SERVICE_KEY: "YOUR_KEY" } } } }, null, 2)); setMcpCopiedStep("byo-2"); setTimeout(() => setMcpCopiedStep(null), 2000); }} style={{ position: "absolute", top: 4, right: 4, padding: "2px 7px", borderRadius: 4, border: "none", background: mcpCopiedStep === "byo-2" ? "#2DA44E" : "#333", color: "#fff", fontSize: 10, cursor: "pointer", fontFamily: FONT }}>
-                                {mcpCopiedStep === "byo-2" ? "Copied!" : "Copy config"}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                        {/* Step 3 */}
-                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                          <div style={{ minWidth: 24, height: 24, borderRadius: "50%", background: "#1967D2", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, marginTop: 2 }}>3</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: TEXT, marginBottom: 4 }}>Restart Claude Code and say:</div>
-                            <div style={{ padding: "8px 10px", borderRadius: 6, background: "#1C1C1E", fontSize: 11, fontFamily: MONO, color: "#8FBC8F", lineHeight: 1.5 }}>
-                              {`"Plan my project: ${brief.slice(0, 50)}${brief.length > 50 ? "..." : ""}"`}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Copyable prompt block */}
-                <div
-                  onClick={() => {
-                    navigator.clipboard.writeText(byoPlanPrompt).then(() => {
-                      setByoCopied(true);
-                      setTimeout(() => setByoCopied(false), 2000);
-                    });
-                  }}
-                  style={{
-                    background: "#1C1C1E", borderRadius: 10,
-                    padding: 14, fontSize: 11,
-                    fontFamily: "'DM Mono', 'Fira Code', monospace",
-                    lineHeight: 1.5, color: "#8FBC8F",
-                    marginBottom: 8, cursor: "pointer",
-                    whiteSpace: "pre-wrap", wordBreak: "break-word",
-                    maxHeight: 240, overflow: "auto",
-                    position: "relative",
-                  }}
-                  title="Click to copy prompt"
-                >
-                  {byoPlanPrompt}
-                </div>
-
-                {/* Open in Tool + Copy buttons */}
-                <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
-                  {(() => {
-                    const info = getPreferredByoTool();
-                    if (info?.url) {
-                      return (
-                        <button
-                          onClick={() => handleOpenInTool(byoPlanPrompt)}
-                          style={{
-                            padding: "8px 18px", border: "none", borderRadius: 8,
-                            background: byoOpenedTool ? "#2DA44E" : PRIMARY,
-                            color: "#fff", fontSize: 13, fontWeight: 600,
-                            cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                            transition: "background 0.2s",
-                            display: "inline-flex", alignItems: "center", gap: 6,
-                          }}
-                        >
-                          {byoOpenedTool
-                            ? `Prompt copied! Opening ${byoOpenedTool}...`
-                            : `Open in ${info.cap.label} \u2192`}
-                        </button>
-                      );
-                    }
-                    return null;
-                  })()}
+                <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
                   <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(byoPlanPrompt).then(() => {
-                        setByoCopied(true);
-                        setTimeout(() => setByoCopied(false), 2000);
-                      });
-                    }}
+                    onClick={() => { setShowByokSection(true); }}
                     style={{
-                      padding: "6px 14px", border: `1px solid ${BORDER}`, borderRadius: 8,
-                      background: byoCopied ? "#2DA44E" : "transparent",
-                      color: byoCopied ? "#fff" : TEXT_LIGHT, fontSize: 12, fontWeight: 500,
+                      padding: "10px 24px", border: "none", borderRadius: 10,
+                      background: PRIMARY, color: "#fff", fontSize: 14, fontWeight: 600,
                       cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                      transition: "all 0.2s",
                     }}
                   >
-                    {byoCopied ? "\u2713 Copied!" : "Copy prompt"}
+                    Add your API key
                   </button>
-                </div>
-
-                {/* Waiting for result indicator */}
-                {byoWaitingForResult && !byoJsonInput.trim() && (
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "8px 12px", borderRadius: 8,
-                    background: `${PRIMARY}08`, border: `1px solid ${PRIMARY}20`,
-                    marginBottom: 10, fontSize: 12, color: PRIMARY, fontWeight: 500,
-                  }}>
-                    <div style={{
-                      width: 12, height: 12,
-                      border: `2px solid ${PRIMARY}`,
-                      borderTopColor: "transparent",
-                      borderRadius: "50%",
-                      animation: "spin 0.8s linear infinite",
-                    }} />
-                    Waiting for your result...
-                  </div>
-                )}
-
-                {/* Paste area — prominently styled */}
-                <div style={{
-                  padding: 16, borderRadius: 12,
-                  border: `2px solid ${byoJsonInput.trim() ? PRIMARY : BORDER}`,
-                  background: byoJsonInput.trim() ? `${PRIMARY}06` : SURFACE,
-                  transition: "all 0.2s",
-                }}>
-                  <label style={{ fontSize: 14, fontWeight: 600, color: TEXT, display: "block", marginBottom: 8 }}>
-                    Paste the plan JSON from your AI:
-                  </label>
-                  <textarea
-                    value={byoJsonInput}
-                    onChange={(e) => { setByoJsonInput(e.target.value); setByoJsonError(""); }}
-                    placeholder={'{\n  "project_title": "My Project",\n  "summary": "...",\n  "nodes": [\n    { "type": "task", "id": "...", "title": "...", ... }\n  ]\n}'}
-                    style={{
-                      width: "100%", minHeight: 160, padding: 12, fontSize: 12,
-                      fontFamily: "'DM Mono', 'Fira Code', monospace", borderRadius: 10,
-                      border: `1.5px solid ${byoJsonError ? "#CF522E" : BORDER}`,
-                      background: "#fff",
-                      outline: "none", resize: "vertical", lineHeight: 1.5,
-                      boxSizing: "border-box",
-                    }}
-                  />
-                  {byoJsonError && (
-                    <div style={{ fontSize: 12, color: "#CF522E", marginTop: 6 }}>{byoJsonError}</div>
-                  )}
-                </div>
-
-                {/* Action buttons */}
-                <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap", alignItems: "center" }}>
-                  {byoJsonInput.trim() && (
-                    <button
-                      onClick={handleByoPlanPaste}
-                      style={{
-                        padding: "10px 28px", border: "none", borderRadius: 10,
-                        background: PRIMARY, color: "#fff", fontSize: 14, fontWeight: 600,
-                        cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                        boxShadow: `0 1px 3px ${PRIMARY}40`,
-                      }}
-                    >
-                      Build plan from JSON
-                    </button>
-                  )}
                   <button
                     onClick={handleCompileFallbackToApi}
                     style={{
-                      padding: "10px 16px", border: "none", borderRadius: 10,
-                      background: "transparent", color: TEXT_LIGHT, fontSize: 12,
+                      padding: "10px 20px", border: `1px solid ${BORDER}`, borderRadius: 10,
+                      background: SURFACE, color: TEXT, fontSize: 14, fontWeight: 500,
                       cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                      textDecoration: "underline", textDecorationStyle: "dotted" as const,
                     }}
                   >
                     Use our API instead
                   </button>
-                  <div style={{ flex: 1 }} />
+                </div>
+                <div style={{ fontSize: 12, color: TEXT_LIGHT, marginTop: 14 }}>
+                  Or if you use Claude Code: set up MCP for hands-free execution.
+                </div>
+                <div style={{ marginTop: 12 }}>
                   <button
                     onClick={() => setStep("input")}
                     style={{
-                      padding: "10px 16px", border: `1px solid ${BORDER}`, borderRadius: 10,
-                      background: "transparent", color: TEXT_LIGHT, fontSize: 13,
+                      background: "none", border: "none", color: TEXT_LIGHT, fontSize: 13,
                       cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                      textDecoration: "underline", textDecorationStyle: "dotted" as const,
                     }}
                   >
                     &larr; Back to brief
@@ -4389,6 +4038,69 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                   </div>
                 )}
 
+                {/* Brain Fry indicator + Batch Review button */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                  {aiInteractionCount > 0 && (
+                    <span style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      padding: "3px 10px",
+                      borderRadius: 12,
+                      background: brainFryLevel.bg,
+                      border: `1px solid ${brainFryLevel.color}30`,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: brainFryLevel.color,
+                    }}>
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: brainFryLevel.color }} />
+                      {brainFryLevel.label}
+                    </span>
+                  )}
+                  {allTasks.filter((t) => t.assignee === "agent" && doneIds.has(t.id)).length >= 2 && (
+                    <button
+                      onClick={() => setShowBatchReview(true)}
+                      style={{
+                        padding: "3px 12px",
+                        borderRadius: 12,
+                        border: `1px solid ${PRIMARY}40`,
+                        background: `${PRIMARY}08`,
+                        color: PRIMARY,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      Review all ({allTasks.filter((t) => t.assignee === "agent" && doneIds.has(t.id)).length} AI tasks)
+                    </button>
+                  )}
+                </div>
+
+                {/* Session break reminder */}
+                {showSessionBreak && (
+                  <div style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    background: "#6E57E00a",
+                    border: "1px solid #6E57E025",
+                    marginBottom: 12,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}>
+                    <div style={{ fontSize: 12, color: "#6E57E0", fontWeight: 500 }}>
+                      You&apos;ve been going for a while. Quick stretch?
+                    </div>
+                    <button
+                      onClick={() => setShowSessionBreak(false)}
+                      style={{ background: "none", border: "none", color: TEXT_LIGHT, fontSize: 16, cursor: "pointer", padding: "0 4px" }}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                )}
+
                 {/* Progress bar with streak dots */}
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
                   <div
@@ -4525,19 +4237,23 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                       onRunAgent={handleRunAgent}
                       onAddNote={addNote}
                       projectSummary={plan?.summary || brief}
+                      projectTitle={plan?.project_title}
+                      projectBrief={brief}
                       autoExpandSubtasks
                       doneSubtaskIds={doneSubtaskIds}
                       onToggleSubtask={toggleSubtask}
                       priorResults={allTasks
-                        .filter((t) => results[t.id]?.done)
+                        .filter((t) => results[t.id]?.done || doneIds.has(t.id))
                         .map((t) => ({
                           title: t.title,
                           assignee: t.assignee,
-                          output: results[t.id]?.finalOutput || results[t.id]?.steps
+                          output: taskOutputs[t.id] || results[t.id]?.finalOutput || results[t.id]?.steps
                             ?.filter((s) => s.type === "output")
                             .map((s) => s.type === "output" ? s.content : "")
-                            .join("\n") || "",
+                            .join("\n") || t.notes || "",
                         }))}
+                      dependencyOutputs={getDependencyOutputs(oneThingTask)}
+                      siblingTasks={getSiblingTasks(oneThingTask)}
                       allTasksList={allTasks}
                       executionMode={executionMode}
                       userTools={userTools}
@@ -4870,103 +4586,37 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                     </span>
                     {/* Mode toggle pill */}
                     {(claudeCodeCount > 0 || builtinAgentCount > 0) && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <div style={{
-                          display: "inline-flex", borderRadius: 20, overflow: "hidden",
-                          border: `1.5px solid ${BORDER}`, background: "#F7F6F3",
-                        }}>
-                          <button
-                            onClick={() => {
-                              setExecutionMode("byo");
-                              if (userTools.available.length === 0) setShowInlineToolPicker(true);
-                            }}
-                            style={{
-                              padding: "5px 14px", border: "none", cursor: "pointer",
-                              fontSize: 12, fontWeight: executionMode === "byo" ? 600 : 400,
-                              fontFamily: "'DM Sans', sans-serif",
-                              background: executionMode === "byo" ? "#E8F0FE" : "transparent",
-                              color: executionMode === "byo" ? "#1967D2" : TEXT_LIGHT,
-                              transition: "all 0.2s",
-                              borderRight: `1px solid ${BORDER}`,
-                            }}
-                          >
-                            BYO{executionMode === "byo" && userTools.available.length > 0 ? `: ${userTools.available.map(t => TOOL_CAPABILITIES[t].label).join(", ")}` : ""}
-                          </button>
-                          <button
-                            onClick={() => { setExecutionMode("api"); setShowInlineToolPicker(false); }}
-                            style={{
-                              padding: "5px 14px", border: "none", cursor: "pointer",
-                              fontSize: 12, fontWeight: executionMode === "api" ? 600 : 400,
-                              fontFamily: "'DM Sans', sans-serif",
-                              background: executionMode === "api" ? `${PRIMARY}18` : "transparent",
-                              color: executionMode === "api" ? PRIMARY : TEXT_LIGHT,
-                              transition: "all 0.2s",
-                            }}
-                          >
-                            Auto: Using our API
-                          </button>
-                        </div>
-                        {executionMode === "byo" && userTools.available.length > 0 && !showInlineToolPicker && (
-                          <button
-                            onClick={() => setShowInlineToolPicker(true)}
-                            style={{
-                              background: "none", border: "none", color: TEXT_LIGHT,
-                              fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                              textDecoration: "underline", textDecorationStyle: "dotted" as const,
-                              padding: 0, textAlign: "left",
-                            }}
-                          >
-                            Change tools
-                          </button>
-                        )}
-                        {showInlineToolPicker && executionMode === "byo" && (
-                          <div style={{
-                            display: "flex", flexWrap: "wrap", gap: 4, padding: "6px 0",
-                          }}>
-                            {(Object.keys(TOOL_CAPABILITIES) as UserTool[]).map((tool) => {
-                              const cap = TOOL_CAPABILITIES[tool];
-                              const isSelected = userTools.available.includes(tool);
-                              return (
-                                <button
-                                  key={tool}
-                                  onClick={() => {
-                                    setUserTools((prev) => {
-                                      const next = isSelected
-                                        ? prev.available.filter((t) => t !== tool)
-                                        : [...prev.available, tool];
-                                      if (next.length === 0) { setExecutionMode("api"); setShowInlineToolPicker(false); }
-                                      const newPreferred = prev.preferred === tool && isSelected ? undefined : prev.preferred;
-                                      return { ...prev, available: next as UserTool[], preferred: newPreferred };
-                                    });
-                                  }}
-                                  style={{
-                                    padding: "3px 8px", borderRadius: 6,
-                                    border: `1px solid ${isSelected ? "#1967D2" : BORDER}`,
-                                    background: isSelected ? "#E8F0FE" : "transparent",
-                                    color: isSelected ? "#1967D2" : TEXT_LIGHT,
-                                    fontSize: 11, fontWeight: isSelected ? 600 : 400,
-                                    cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                                    transition: "all 0.15s",
-                                    display: "inline-flex", alignItems: "center", gap: 3,
-                                  }}
-                                  title={cap.strengths.join(", ")}
-                                >
-                                  {cap.icon} {cap.label}
-                                </button>
-                              );
-                            })}
-                            <button
-                              onClick={() => setShowInlineToolPicker(false)}
-                              style={{
-                                background: "none", border: "none", color: TEXT_LIGHT,
-                                fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
-                                padding: "3px 4px",
-                              }}
-                            >
-                              Done
-                            </button>
-                          </div>
-                        )}
+                      <div style={{
+                        display: "inline-flex", borderRadius: 20, overflow: "hidden",
+                        border: `1.5px solid ${BORDER}`, background: "#F7F6F3",
+                      }}>
+                        <button
+                          onClick={() => setExecutionMode("byo")}
+                          style={{
+                            padding: "5px 14px", border: "none", cursor: "pointer",
+                            fontSize: 12, fontWeight: executionMode === "byo" ? 600 : 400,
+                            fontFamily: "'DM Sans', sans-serif",
+                            background: executionMode === "byo" ? "#E8F0FE" : "transparent",
+                            color: executionMode === "byo" ? "#1967D2" : TEXT_LIGHT,
+                            transition: "all 0.2s",
+                            borderRight: `1px solid ${BORDER}`,
+                          }}
+                        >
+                          {executionMode === "byo" && (byoKeys.anthropic || byoKeys.google || byoKeys.openai) ? "My API Key" : "BYO"}
+                        </button>
+                        <button
+                          onClick={() => setExecutionMode("api")}
+                          style={{
+                            padding: "5px 14px", border: "none", cursor: "pointer",
+                            fontSize: 12, fontWeight: executionMode === "api" ? 600 : 400,
+                            fontFamily: "'DM Sans', sans-serif",
+                            background: executionMode === "api" ? `${PRIMARY}18` : "transparent",
+                            color: executionMode === "api" ? PRIMARY : TEXT_LIGHT,
+                            transition: "all 0.2s",
+                          }}
+                        >
+                          Our API
+                        </button>
                       </div>
                     )}
                   </div>
@@ -5183,9 +4833,12 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
                   onRunAgent={handleRunAgent}
                   onAddNote={addNote}
                   projectSummary={plan?.summary || brief}
+                  projectTitle={plan?.project_title}
+                  projectBrief={brief}
                   doneSubtaskIds={doneSubtaskIds}
                   onToggleSubtask={toggleSubtask}
                   allTasks={allTasks}
+                  taskOutputs={taskOutputs}
                   executionMode={executionMode}
                   userTools={userTools}
                   onEditTask={editTask}
@@ -5201,6 +4854,412 @@ Generate a realistic, practical plan with 6-12 top-level tasks. Make sure the de
           );
         })()}
       </main>
+
+      {/* Quick capture toast */}
+      {quickCaptureToast && (
+        <div style={{
+          position: "fixed",
+          bottom: 24,
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "#2DA44E",
+          color: "#fff",
+          padding: "10px 18px",
+          borderRadius: 10,
+          fontSize: 13,
+          fontWeight: 600,
+          fontFamily: FONT,
+          zIndex: 1001,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+        }}>
+          Added to {quickCaptureToast}
+        </div>
+      )}
+
+      {/* Catch-up panel */}
+      {showCatchUp && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.3)",
+            zIndex: 900,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "flex-start",
+            overflowY: "auto",
+            padding: "60px 20px 40px",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCatchUp(false); }}
+        >
+          <div style={{
+            background: "#F7F6F3",
+            borderRadius: 16,
+            width: "100%",
+            maxWidth: 640,
+            padding: "28px 24px",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 700, color: TEXT, margin: 0 }}>30-Second Catch-Up</h2>
+              <button
+                onClick={() => setShowCatchUp(false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: 20,
+                  color: TEXT_LIGHT,
+                  cursor: "pointer",
+                  padding: "4px 8px",
+                  lineHeight: 1,
+                }}
+              >
+                x
+              </button>
+            </div>
+
+            {savedPlans.length === 0 ? (
+              <div style={{ padding: 20, textAlign: "center", color: TEXT_LIGHT, fontSize: 14 }}>
+                No projects yet. Create your first project to see a summary here.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {savedPlans.map((sp) => {
+                  const tasks = getAllTasks(sp.nodes);
+                  const doneSet = new Set(sp.done_ids || []);
+                  const doneTasks = tasks.filter((t) => doneSet.has(t.id));
+                  const totalTasks = tasks.length;
+                  const pct = totalTasks > 0 ? Math.round((doneTasks.length / totalTasks) * 100) : 0;
+
+                  // Last completed task
+                  const lastDone = doneTasks.length > 0 ? doneTasks[doneTasks.length - 1] : null;
+
+                  // Next task (top scored pending)
+                  const unlockedNodes = computeUnlocked(sp.nodes, doneSet);
+                  const pendingTasks = getAllTasks(unlockedNodes).filter((t) => t.status === "pending" && !doneSet.has(t.id));
+                  const scored = scoreTasks(pendingTasks, tasks, null, sp.priority || "medium");
+                  const nextTask = scored[0]?.task || null;
+
+                  // Deadline warnings: tasks with deadline within 48 hours
+                  const now = Date.now();
+                  const deadlineWarnings = tasks.filter((t) => {
+                    if (!t.deadline || doneSet.has(t.id)) return false;
+                    const dl = new Date(t.deadline).getTime();
+                    return dl - now < 48 * 60 * 60 * 1000 && dl - now > -48 * 60 * 60 * 1000;
+                  });
+
+                  return (
+                    <div key={sp.id} style={{
+                      background: SURFACE,
+                      borderRadius: 12,
+                      padding: "16px 20px",
+                      border: `1px solid ${BORDER}`,
+                    }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: TEXT, marginBottom: 8 }}>
+                        {sp.project_title || "Untitled project"}
+                      </div>
+
+                      {/* Progress bar */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                        <div style={{
+                          flex: 1,
+                          height: 6,
+                          borderRadius: 3,
+                          background: `${BORDER}`,
+                          overflow: "hidden",
+                        }}>
+                          <div style={{
+                            width: `${pct}%`,
+                            height: "100%",
+                            borderRadius: 3,
+                            background: pct === 100 ? "#2DA44E" : PRIMARY,
+                            transition: "width 0.3s",
+                          }} />
+                        </div>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: pct === 100 ? "#2DA44E" : TEXT, whiteSpace: "nowrap" }}>
+                          {doneTasks.length}/{totalTasks} done
+                        </span>
+                      </div>
+
+                      {/* Last activity */}
+                      {lastDone && (
+                        <div style={{ fontSize: 12, color: TEXT_LIGHT, marginBottom: 4 }}>
+                          Last: Completed &ldquo;{lastDone.title}&rdquo;
+                        </div>
+                      )}
+
+                      {/* Next task */}
+                      {nextTask && (
+                        <div style={{ fontSize: 13, fontWeight: 600, color: PRIMARY, marginBottom: 4 }}>
+                          Next up: {nextTask.title}
+                        </div>
+                      )}
+
+                      {/* Deadline warnings */}
+                      {deadlineWarnings.length > 0 && (
+                        <div style={{ marginTop: 6 }}>
+                          {deadlineWarnings.map((t) => {
+                            const hoursLeft = Math.round((new Date(t.deadline!).getTime() - now) / (1000 * 60 * 60));
+                            const isOverdue = hoursLeft < 0;
+                            return (
+                              <div key={t.id} style={{
+                                fontSize: 12,
+                                fontWeight: 600,
+                                color: "#CF522E",
+                                padding: "3px 0",
+                              }}>
+                                {isOverdue ? "OVERDUE" : `Due in ${hoursLeft}h`}: {t.title}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {doneTasks.length === totalTasks && totalTasks > 0 && (
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#2DA44E", marginTop: 4 }}>
+                          All done!
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div style={{ textAlign: "center", marginTop: 20 }}>
+              <button
+                onClick={() => setShowCatchUp(false)}
+                style={{
+                  padding: "8px 24px",
+                  borderRadius: 8,
+                  border: `1px solid ${BORDER}`,
+                  background: SURFACE,
+                  color: TEXT,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: FONT,
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── BRAIN FRY OVERLAY ─── */}
+      {showBrainFryOverlay && (
+        <div style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.5)",
+          zIndex: 2000,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}>
+          <div style={{
+            background: "#fff",
+            borderRadius: 16,
+            padding: "32px 28px",
+            maxWidth: 400,
+            width: "90%",
+            textAlign: "center",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+          }}>
+            {brainFryPaused ? (
+              <>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>&#x1F33F;</div>
+                <h3 style={{ fontSize: 20, fontWeight: 700, color: TEXT, margin: "0 0 8px 0" }}>
+                  Taking a break
+                </h3>
+                <p style={{ fontSize: 14, color: TEXT_LIGHT, lineHeight: 1.6, marginBottom: 20 }}>
+                  All timers paused. Close your eyes, stretch, grab water. Your work will be here when you get back.
+                </p>
+                <button
+                  onClick={() => {
+                    setBrainFryPaused(false);
+                    setShowBrainFryOverlay(false);
+                    setBrainFryDismissed(true);
+                  }}
+                  style={{
+                    padding: "10px 24px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: PRIMARY,
+                    color: "#fff",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  I&apos;m back
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>&#x1F9E0;</div>
+                <h3 style={{ fontSize: 20, fontWeight: 700, color: "#CF222E", margin: "0 0 8px 0" }}>
+                  Brain fry alert
+                </h3>
+                <p style={{ fontSize: 14, color: TEXT_LIGHT, lineHeight: 1.6, marginBottom: 8 }}>
+                  You&apos;ve had {aiInteractionCount} AI interactions this session. Research shows that heavy AI supervision leads to cognitive overload and more errors.
+                </p>
+                <p style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 20 }}>
+                  A 5-minute break can help you reset.
+                </p>
+                <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+                  <button
+                    onClick={() => setBrainFryPaused(true)}
+                    style={{
+                      padding: "10px 24px",
+                      borderRadius: 10,
+                      border: "none",
+                      background: "#2DA44E",
+                      color: "#fff",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    Take a break
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowBrainFryOverlay(false);
+                      setBrainFryDismissed(true);
+                    }}
+                    style={{
+                      padding: "10px 24px",
+                      borderRadius: 10,
+                      border: `1px solid ${BORDER}`,
+                      background: "transparent",
+                      color: TEXT_LIGHT,
+                      fontSize: 14,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    I&apos;m fine
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── BATCH REVIEW OVERLAY ─── */}
+      {showBatchReview && plan && (() => {
+        const completedAgentTasks = allTasks.filter(
+          (t) => t.assignee === "agent" && doneIds.has(t.id)
+        );
+        return (
+          <div style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            zIndex: 2000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            overflow: "auto",
+          }}>
+            <div style={{
+              background: "#fff",
+              borderRadius: 16,
+              padding: "28px 24px",
+              maxWidth: 560,
+              width: "90%",
+              maxHeight: "80vh",
+              overflow: "auto",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+            }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, color: TEXT, margin: "0 0 4px 0" }}>
+                Batch review
+              </h3>
+              <p style={{ fontSize: 13, color: TEXT_LIGHT, marginBottom: 16 }}>
+                {completedAgentTasks.length} AI tasks completed. Review them all at once to reduce oversight burden.
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+                {completedAgentTasks.map((t) => {
+                  const result = results[t.id];
+                  const output = taskOutputs[t.id] || result?.finalOutput || result?.steps
+                    ?.filter((s) => s.type === "output")
+                    .map((s) => s.type === "output" ? s.content : "")
+                    .join("\n") || t.notes || "";
+                  return (
+                    <div key={t.id} style={{
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      background: SURFACE,
+                      border: `1px solid ${BORDER}`,
+                    }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 4 }}>
+                        {t.title}
+                      </div>
+                      {output && (
+                        <div style={{
+                          fontSize: 12,
+                          color: TEXT_LIGHT,
+                          lineHeight: 1.5,
+                          whiteSpace: "pre-wrap",
+                          maxHeight: 80,
+                          overflow: "hidden",
+                          background: "#F7F6F3",
+                          padding: "8px 10px",
+                          borderRadius: 6,
+                        }}>
+                          {output.slice(0, 300)}
+                          {output.length > 300 ? "..." : ""}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button
+                  onClick={() => setShowBatchReview(false)}
+                  style={{
+                    padding: "10px 20px",
+                    borderRadius: 10,
+                    border: `1px solid ${BORDER}`,
+                    background: "transparent",
+                    color: TEXT,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  Review individually
+                </button>
+                <button
+                  onClick={() => setShowBatchReview(false)}
+                  style={{
+                    padding: "10px 20px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: "#2DA44E",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  Approve all
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Undo toast */}
       {undoToast && (
