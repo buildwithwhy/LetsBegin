@@ -1,38 +1,67 @@
- have combined the high-level narrative with the technical architecture details to give you a professional, comprehensive front page.
+# LetsBegin
 
-### Copy and paste the text below:
+**Your AI tools are frying your brain. We fix that.**
 
-`markdown
-# LetsBegin: AI-Human Synergistic Architecture
+A [2026 BCG study](https://hbr.org/2026/03/when-using-ai-leads-to-brain-fry) found workers using 4+ AI tools make 39% more major errors. LetsBegin replaces the chaos with one calm workflow: describe what you want to build, get a structured plan, and execute it — with AI doing the heavy lifting while you stay in control.
 
-LetsBegin is a TypeScript-native framework designed to prioritize transactional continuity and seamless AI-human coordination. In an era where AI agents are integrated into the development lifecycle, this project provides the structural blueprint for building systems that are both human-readable and AI-navigable.
+## What it does
 
-## 🚀 The Vision
-Traditional AI planning is often volatile—one error causes the agent to "start over." LetsBegin eliminates this friction by treating human-AI interaction as a continuous, state-aware partnership.
+1. **Describe your project** — Write a brief (or let AI help you write one)
+2. **Get a structured plan** — AI breaks it into a dependency graph (DAG) of tasks
+3. **Execute with flexibility** — Use our API, bring your own API key (BYOK), or connect via MCP/OpenClaw
+4. **Review in batches** — Reduce oversight burden with batch review mode instead of constant supervision
 
-### Core Pillars:
-• No Plan Regeneration: Instead of discarding tasks when goals shift, we use incremental modification (delta-patching) to preserve intent and reduce latency.
-• Typed Contextual Hand-offs: We replace brittle string parsing with strict TypeScript schemas, ensuring that human feedback is integrated as a live update to the agent's environment.
-• Transactional Continuity: A shared TypeScript state tree ensures the system remains grounded, observable, and easily resumable.
+## Key features
 
-## 🏗 Technical Architecture
-Our architecture leverages TypeScript's strict typing to create a "Contract-First" development environment:
+- **One tool, not six** — Plan, execute, and review in one place. No more tab circus.
+- **Zero-context chat** — Task chat is pre-loaded with your full project context. Never re-explain.
+- **Context carry-forward** — Completed task outputs automatically feed into downstream tasks.
+- **Cross-project intelligence** — "Your Day" dashboard picks the best tasks across all your projects based on energy, deadlines, and priority.
+- **Brain fry protection** — Tracks your cognitive load, suggests breaks, and adapts task recommendations to your energy level.
+- **ADHD-friendly UX** — Task timer, streaks, encouragement, break reminders, and "break it down more" for any task.
+- **Quick capture** — Instantly add thoughts to any project from the dashboard.
+- **OpenClaw compatible** — Use LetsBegin as an [OpenClaw Skill](./openclaw/README.md) from WhatsApp, Slack, Telegram, or any messaging app.
 
-•   Interfaces as Truth: Explicitly defined interfaces serve as the protocol between human intent and AI generation.
-•   Modular Decoupling: Business logic is isolated from side effects, allowing AI agents to refactor or execute tasks with high confidence.
-•   Context Management: A structured hierarchy designed to provide LLMs with optimal RAG (Retrieval-Augmented Generation) context, solving the "Black Box" problem.
+## Execution modes
 
-## 🛠 Problem-Solving Focus
-1.  Context Management: Synchronized state prevents AI "hallucinations" regarding task progress.
-2.  Structured Communication: Uses Zod-backed schemas for validation between agents and humans.
-3.  Coordination Complexity: Manages asynchronous hand-offs through an event-driven architecture.
+| Mode | How it works |
+|---|---|
+| **Our API** | We handle everything. Zero setup. |
+| **Your API Key (BYOK)** | Add your Anthropic/Google/OpenAI key. Your calls, your cost. |
+| **MCP** | Use `get_planning_prompt` and `submit_plan` tools from Claude Code or any MCP client. |
+| **OpenClaw** | Install the LetsBegin skill and interact through your messaging apps. |
 
-## 🚦 Getting Started
-LetsBegin is built for intermediate to advanced developers looking to scale collaborative AI applications.
+## Getting started
 
-1. Define Schemas: Establish your task types using TypeScript/Zod.
-2. Configure Agents: Set confidence thresholds for autonomous vs. human-supervised execution.
-3. Execute Workflows: Use the Orchestrator to manage the lifecycle of your collaborative tasks.
+```bash
+npm install
+npm run dev
+```
 
----
-For detailed implementation patterns and API references, please see [TECHNICAL.md](./TECHNICAL.md).
+Set up your environment variables:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+ANTHROPIC_API_KEY=your-key        # for "Our API" mode
+GOOGLE_GENERATIVE_AI_API_KEY=your-key  # optional
+```
+
+## Tech stack
+
+- **Next.js 16** with Turbopack
+- **Supabase** for auth and user settings
+- **Vercel AI SDK** for streaming LLM responses
+- **TypeScript** throughout
+
+## MCP Server
+
+See [mcp-server/README.md](./mcp-server/README.md) for setup instructions.
+
+## OpenClaw Skill
+
+See [openclaw/README.md](./openclaw/README.md) for installation.
+
+## License
+
+MIT
